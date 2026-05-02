@@ -1,6 +1,7 @@
 """
-Leave Management Agent for NovaHR
+Leave Management Agent for NovaHR - Simplified Non-LLM Version
 Step-based workflow for processing leave requests
+No LLM dependency to avoid rate limit issues
 """
 
 from datetime import datetime, timedelta
@@ -13,18 +14,45 @@ LEAVE_POLICY = {
     "SL": 12,  # Sick Leave
 }
 
+# Conversation memory store for multi-turn support
+conversation_memory_store = {}
+
+
+class ConversationMemory:
+    """Manages in-memory conversation history"""
+
+    def __init__(self, employee_id: int, employee_name: str, max_messages: int = 100):
+        self.employee_id = employee_id
+        self.employee_name = employee_name
+        self.messages: list[dict] = []
+        self.max_messages = max_messages
+        self.created_at = datetime.now()
+        self.leave_request = {}  # Store leave details
+
+    def add_message(self, role: str, content: str):
+        """Add message to memory"""
+        self.messages.append({"role": role, "content": content})
+
+        # Keep only recent messages if exceeds max
+        if len(self.messages) > self.max_messages:
+            self.messages = self.messages[-self.max_messages :]
+
+    def set_leave_data(self, **kwargs):
+        """Store leave request details"""
+        self.leave_request.update(kwargs)
+
+    def get_leave_data(self):
+        """Get leave request details"""
+        return self.leave_request
+
+    def clear(self):
+        """Clear memory"""
+        self.messages = []
+        self.leave_request = {}
+
 
 def parse_date(date_input: str) -> str:
-    """
-    Parse flexible date input and return YYYY-MM-DD format
-    Handles formats like "2025-05-15", "15/05/2025", "May 15", "tomorrow", etc.
-
-    Args:
-        date_input (str): User input date
-
-    Returns:
-        str: Formatted date as YYYY-MM-DD, or None if invalid
-    """
+    """Parse flexible date input and return YYYY-MM-DD format"""
     date_input = date_input.strip().lower()
 
     # Handle special cases
@@ -54,344 +82,209 @@ def parse_date(date_input: str) -> str:
 
 
 def calculate_days(start_date: str, end_date: str) -> int:
-    """
-    Calculate number of days between two dates (inclusive)
-
-    Args:
-        start_date (str): Start date in YYYY-MM-DD format
-        end_date (str): End date in YYYY-MM-DD format
-
-    Returns:
-        int: Number of days (or -1 if invalid)
-    """
+    """Calculate number of days between two dates (inclusive)"""
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
-
-        # Validate dates
-        if start > end:
-            return -1
-
-        # Calculate difference (inclusive of both days)
-        days = (end - start).days + 1
-        return days
-    except ValueError:
+        return (end - start).days + 1
+    except:
         return -1
 
 
-def get_employee(name: str):
+def leave_agent(state: dict) -> dict:
     """
-    Fetch employee from database by name
-
-    Args:
-        name (str): Employee name
-
-    Returns:
-        dict: Employee record or None if not found
+    Simple rule-based leave request handler (no LLM required)
+    Supports multi-turn conversations with memory
     """
-    db = get_db()
-    query = "SELECT * FROM employees WHERE LOWER(name) = LOWER(%s)"
-    result = db.execute_query(query, (name,))
+    user_input = state.get("input", "").strip().lower()
+    employee_id = state.get("employee_id", 0)
+    employee_name = state.get("employee_name", "")
+    step = state.get("step", "initial")
 
-    if result and len(result) > 0:
-        return result[0]
-    return None
-
-
-def get_used_leaves(employee_id: int, leave_type: str) -> int:
-    """
-    Get total approved leave days used by employee for specific leave type
-
-    Args:
-        employee_id (int): Employee ID
-        leave_type (str): Type of leave (EL/CL/SL)
-
-    Returns:
-        int: Total approved leave days used
-    """
-    db = get_db()
-    query = """
-    SELECT COALESCE(SUM(days), 0) as total_used
-    FROM leaves
-    WHERE employee_id = %s 
-    AND leave_type = %s 
-    AND status = 'approved'
-    """
-    result = db.execute_query(query, (employee_id, leave_type))
-
-    if result and len(result) > 0:
-        return result[0]["total_used"]
-    return 0
-
-
-def apply_leave(
-    employee_id: int,
-    leave_type: str,
-    start_date: str,
-    end_date: str,
-    days: int,
-    reason: str,
-) -> dict:
-    """
-    Apply leave and check eligibility
-
-    Args:
-        employee_id (int): Employee ID
-        leave_type (str): Type of leave (EL/CL/SL)
-        start_date (str): Start date (YYYY-MM-DD)
-        end_date (str): End date (YYYY-MM-DD)
-        days (int): Number of days
-        reason (str): Reason for leave
-
-    Returns:
-        dict: {status: 'approved'/'rejected', message: str, remaining: int}
-    """
-    db = get_db()
-
-    # Check if leave type is valid
-    if leave_type not in LEAVE_POLICY:
-        return {
-            "status": "rejected",
-            "message": f"Invalid leave type. Allowed: {', '.join(LEAVE_POLICY.keys())}",
-            "remaining": 0,
-        }
-
-    # Get allowed days for this leave type
-    allowed_days = LEAVE_POLICY[leave_type]
-
-    # Get already used days
-    used_days = get_used_leaves(employee_id, leave_type)
-
-    # Calculate remaining days
-    remaining_days = allowed_days - used_days
-
-    # Check if sufficient leaves available
-    if (used_days + days) > allowed_days:
-        return {
-            "status": "rejected",
-            "message": f"Insufficient {leave_type} balance. Requested: {days}, Available: {remaining_days}",
-            "remaining": remaining_days,
-        }
-
-    # Get next leave_id
-    max_id_query = "SELECT MAX(leave_id) as max_id FROM leaves"
-    max_id_result = db.execute_query(max_id_query)
-
-    if max_id_result and len(max_id_result) > 0:
-        max_id = max_id_result[0].get("max_id") or 0
-        new_leave_id = max_id + 1
+    # Get or create memory for this employee
+    if employee_id == 0:
+        temp_key = "temp_user"
+        if temp_key not in conversation_memory_store:
+            conversation_memory_store[temp_key] = ConversationMemory(0, "User")
+        memory = conversation_memory_store[temp_key]
     else:
-        new_leave_id = 1
+        if employee_id not in conversation_memory_store:
+            conversation_memory_store[employee_id] = ConversationMemory(
+                employee_id, employee_name
+            )
+        memory = conversation_memory_store[employee_id]
 
-    # Insert leave record
-    query = """
-    INSERT INTO leaves (leave_id, employee_id, start_date, end_date, leave_type, days, status)
-    VALUES (%s, %s, %s, %s, %s, %s, %s)
-    """
+    # Add user input to memory
+    memory.add_message("user", user_input)
 
-    last_id = db.insert_query(
-        query,
-        (new_leave_id, employee_id, start_date, end_date, leave_type, days, "approved"),
-    )
-
-    if last_id is not None and last_id > 0:
-        new_remaining = remaining_days - days
-        return {
-            "status": "approved",
-            "message": f"[OK] Leave approved! Leave ID: {new_leave_id}",
-            "remaining": new_remaining,
-        }
-    else:
-        # Check if insert actually succeeded even if lastrowid was 0
-        check_query = "SELECT leave_id FROM leaves WHERE leave_id = %s"
-        check_result = db.execute_query(check_query, (new_leave_id,))
-
-        if check_result and len(check_result) > 0:
-            new_remaining = remaining_days - days
-            return {
-                "status": "approved",
-                "message": f"[OK] Leave approved! Leave ID: {new_leave_id}",
-                "remaining": new_remaining,
-            }
-        else:
-            return {
-                "status": "rejected",
-                "message": "Error inserting leave record. Please try again.",
-                "remaining": remaining_days,
-            }
-
-
-def leave_agent(state):
-    """
-    Main leave agent with step-based workflow
-
-    State structure:
-    {
-        "input": str,           # User input
-        "step": str,            # Current step in workflow
-        "leave_data": dict,     # Accumulated leave data
-        "output": str           # Response message
-    }
-
-    Steps: ask_name → ask_type → ask_start_date → ask_end_date → ask_reason → confirm
-
-    Args:
-        state (dict): Current state
-
-    Returns:
-        dict: Updated state
-    """
-
-    current_step = state.get("step", "ask_name")
-    leave_data = state.get("leave_data", {})
-    user_input = state.get("input", "").strip()
-
-    # Step 1: Ask for employee name
-    if current_step == "ask_name":
-        if not user_input:
-            state["output"] = "Enter your name:"
-            state["step"] = "ask_name"
-        else:
-            employee = get_employee(user_input)
-
-            if employee:
-                leave_data["employee_id"] = employee["id"]
-                leave_data["employee_name"] = employee["name"]
-                state["output"] = (
-                    f"Welcome {employee['name']}!\n\nSelect leave type:\n1. EL (Earned Leave - 18 days)\n2. CL (Casual Leave - 12 days)\n3. SL (Sick Leave - 12 days)\n\nEnter EL, CL, or SL:"
+    try:
+        # ==================== STEP 1: IDENTIFY EMPLOYEE ====================
+        if step == "initial" or step == "identify_employee":
+            if not user_input or step == "initial":
+                response = (
+                    "Hi! I'm here to help with your leave request. What's your name?"
                 )
-                state["step"] = "ask_type"
+                state["step"] = "identify_employee"
             else:
-                state["output"] = (
-                    f"Employee '{user_input}' not found. Please enter a valid name:"
+                # Try to find employee in database (search by name)
+                db = get_db()
+                query = "SELECT id, name FROM employees WHERE LOWER(name) LIKE %s"
+                result = db.execute_query(query, (f"%{user_input.lower()}%",))
+
+                if result:
+                    emp = result[0]
+                    state["employee_id"] = emp["id"]
+                    state["employee_name"] = emp["name"]
+                    memory.employee_id = emp["id"]
+                    memory.employee_name = emp["name"]
+                    response = f"Great! I found you: {emp['name']}. What type of leave do you need? (EL, CL, or SL)"
+                    state["step"] = "ask_leave_type"
+                else:
+                    response = f"I couldn't find an employee named '{user_input}'. Please provide your exact name."
+                    state["step"] = "identify_employee"
+
+        # ==================== STEP 2: GET LEAVE TYPE ====================
+        elif step == "ask_leave_type":
+            leave_type = None
+            if "el" in user_input or "earned" in user_input:
+                leave_type = "EL"
+            elif "cl" in user_input or "casual" in user_input:
+                leave_type = "CL"
+            elif "sl" in user_input or "sick" in user_input:
+                leave_type = "SL"
+
+            if leave_type:
+                memory.set_leave_data(leave_type=leave_type)
+                response = f"Got it, you need {leave_type}. When do you want to take leave? (e.g., '2026-05-05 to 2026-05-06')"
+                state["step"] = "ask_dates"
+            else:
+                response = "Please specify leave type: EL (Earned Leave), CL (Casual Leave), or SL (Sick Leave)"
+                state["step"] = "ask_leave_type"
+
+        # ==================== STEP 3: GET DATES ====================
+        elif step == "ask_dates":
+            # Try to parse dates from input
+            if " to " in user_input or "-" in user_input:
+                if " to " in user_input:
+                    parts = user_input.split(" to ")
+                else:
+                    parts = user_input.split("-")
+
+                if len(parts) == 2:
+                    start_date = parse_date(parts[0].strip())
+                    end_date = parse_date(parts[1].strip())
+
+                    if start_date and end_date:
+                        days = calculate_days(start_date, end_date)
+                        if days > 0:
+                            memory.set_leave_data(
+                                start_date=start_date, end_date=end_date, days=days
+                            )
+                            response = f"I see, {days} days from {start_date} to {end_date}. Any reason for this leave?"
+                            state["step"] = "ask_reason"
+                        else:
+                            response = "Invalid date range. Start date must be before end date. Please try again."
+                            state["step"] = "ask_dates"
+                    else:
+                        response = "I couldn't parse those dates. Please use format: '2026-05-05' or 'May 5'"
+                        state["step"] = "ask_dates"
+                else:
+                    response = "Please provide both start and end dates separated by 'to' (e.g., '2026-05-05 to 2026-05-06')"
+                    state["step"] = "ask_dates"
+            else:
+                response = (
+                    "Please provide date range (e.g., '2026-05-05 to 2026-05-06')"
                 )
-                state["step"] = "ask_name"
+                state["step"] = "ask_dates"
 
-            state["leave_data"] = leave_data
-
-    # Step 2: Ask for leave type
-    elif current_step == "ask_type":
-        if user_input.upper() in LEAVE_POLICY:
-            leave_data["leave_type"] = user_input.upper()
-            state["output"] = (
-                f"Selected: {leave_data['leave_type']}\n\nEnter start date (format: YYYY-MM-DD, or 'today', 'tomorrow'):"
-            )
-            state["step"] = "ask_start_date"
-            state["leave_data"] = leave_data
-        else:
-            state["output"] = "Invalid leave type. Please enter EL, CL, or SL:"
-            state["step"] = "ask_type"
-
-    # Step 3: Ask for start date
-    elif current_step == "ask_start_date":
-        parsed_date = parse_date(user_input)
-
-        if parsed_date:
-            leave_data["start_date"] = parsed_date
-            state["output"] = (
-                f"Start date set to: {parsed_date}\n\nEnter end date (format: YYYY-MM-DD, or 'today', 'tomorrow'):"
-            )
-            state["step"] = "ask_end_date"
-            state["leave_data"] = leave_data
-        else:
-            state["output"] = (
-                "Invalid date format. Please enter a valid date (YYYY-MM-DD, or 'today', 'tomorrow'):"
-            )
-            state["step"] = "ask_start_date"
-
-    # Step 4: Ask for end date
-    elif current_step == "ask_end_date":
-        parsed_date = parse_date(user_input)
-
-        if parsed_date:
-            # Validate date range
-            days = calculate_days(leave_data["start_date"], parsed_date)
-
-            if days > 0:
-                leave_data["end_date"] = parsed_date
-                leave_data["days"] = days
-                state["output"] = (
-                    f"End date set to: {parsed_date}\nTotal days: {days}\n\nEnter reason for leave:"
-                )
+        # ==================== STEP 4: GET REASON ====================
+        elif step == "ask_reason":
+            if user_input and len(user_input) > 3:
+                memory.set_leave_data(reason=user_input)
+                response = "Thank you. Let me verify your request and submit it..."
+                state["step"] = "confirm_request"
+            else:
+                response = "Please provide a reason for your leave request."
                 state["step"] = "ask_reason"
-                state["leave_data"] = leave_data
+
+        # ==================== STEP 5: CONFIRM AND SUBMIT ====================
+        elif step == "confirm_request":
+            # Use leave_data from state (persisted by previous steps)
+            leave_data = state.get("leave_data", {})
+
+            if all(
+                k in leave_data
+                for k in ["leave_type", "start_date", "end_date", "days", "reason"]
+            ):
+                # Check balance
+                db = get_db()
+                emp_id = state.get("employee_id")
+                leave_type = leave_data["leave_type"]
+
+                query = """
+                SELECT COALESCE(SUM(days), 0) as total_used
+                FROM leaves
+                WHERE employee_id = %s 
+                AND leave_type = %s 
+                AND status IN ('approved', 'pending_approval')
+                """
+                result = db.execute_query(query, (emp_id, leave_type))
+                used_days = result[0]["total_used"] if result else 0
+                allowed_days = LEAVE_POLICY[leave_type]
+                remaining_days = allowed_days - used_days
+
+                if used_days + leave_data["days"] <= allowed_days:
+                    # Submit leave request
+                    insert_query = """
+                    INSERT INTO leaves 
+                    (employee_id, start_date, end_date, leave_type, days, status, reason, submitted_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    db.insert_query(
+                        insert_query,
+                        (
+                            emp_id,
+                            leave_data["start_date"],
+                            leave_data["end_date"],
+                            leave_type,
+                            leave_data["days"],
+                            "pending_approval",
+                            leave_data["reason"],
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        ),
+                    )
+
+                    response = f"Leave request submitted successfully! {leave_data['days']} days of {leave_type} approved for {leave_data['start_date']} to {leave_data['end_date']}. Remaining balance: {remaining_days - leave_data['days']} days"
+                    state["step"] = "completed"
+                else:
+                    response = f"Insufficient {leave_type} balance. You have {remaining_days} days available, but requested {leave_data['days']} days."
+                    state["step"] = "completed"
             else:
-                state["output"] = (
-                    "End date must be after start date. Please enter a valid end date:"
+                response = (
+                    "Could not submit request. Missing information. Starting over..."
                 )
-                state["step"] = "ask_end_date"
-        else:
-            state["output"] = "Invalid date format. Please enter a valid date:"
-            state["step"] = "ask_end_date"
-
-    # Step 5: Ask for reason
-    elif current_step == "ask_reason":
-        if user_input and len(user_input) >= 5:
-            leave_data["reason"] = user_input
-
-            # Show summary
-            summary = f"""
-Leave Request Summary:
-- Name: {leave_data["employee_name"]}
-- Leave Type: {leave_data["leave_type"]}
-- Start Date: {leave_data["start_date"]}
-- End Date: {leave_data["end_date"]}
-- Days: {leave_data["days"]}
-- Reason: {leave_data["reason"]}
-
-Type 'confirm' to submit, or 'cancel' to abort:
-"""
-            state["output"] = summary
-            state["step"] = "confirm"
-            state["leave_data"] = leave_data
-        else:
-            state["output"] = (
-                "Reason must be at least 5 characters. Please enter a valid reason:"
-            )
-            state["step"] = "ask_reason"
-
-    # Step 6: Confirm and process
-    elif current_step == "confirm":
-        if user_input.lower() == "confirm":
-            # Process leave application
-            result = apply_leave(
-                leave_data["employee_id"],
-                leave_data["leave_type"],
-                leave_data["start_date"],
-                leave_data["end_date"],
-                leave_data["days"],
-                leave_data["reason"],
-            )
-
-            if result["status"] == "approved":
-                state["output"] = (
-                    f"{result['message']}\nRemaining {leave_data['leave_type']} balance: {result['remaining']} days"
-                )
-            else:
-                state["output"] = (
-                    f"[REJECTED] Leave Rejected\n{result['message']}\nRemaining {leave_data['leave_type']} balance: {result['remaining']} days"
-                )
-
-            # Reset for next leave request
-            state["step"] = "completed"
-            state["leave_data"] = {}
-
-        elif user_input.lower() == "cancel":
-            state["output"] = "Leave request cancelled."
-            state["step"] = "completed"
-            state["leave_data"] = {}
+                state["step"] = "initial"
 
         else:
-            state["output"] = (
-                "Invalid input. Type 'confirm' to submit or 'cancel' to abort:"
-            )
-            state["step"] = "confirm"
+            response = "Hi! I'm here to help with your leave request. What's your name?"
+            state["step"] = "identify_employee"
 
-    # Completed state
-    elif current_step == "completed":
-        state["output"] = (
-            "Leave request process completed. Type 'leave' to submit another request."
-        )
-        state["step"] = "completed"
+    except Exception as e:
+        response = f"Error processing request: {str(e)}"
+        state["step"] = "error"
+
+    # Add response to memory
+    memory.add_message("assistant", response)
+
+    # Set output
+    state["output"] = response
+
+    # Ensure employee info is in state
+    if memory.employee_id > 0:
+        state["employee_id"] = memory.employee_id
+        state["employee_name"] = memory.employee_name
+
+    # Persist leave_data from memory to state for state management
+    state["leave_data"] = memory.get_leave_data()
 
     return state

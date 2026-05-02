@@ -1,5 +1,6 @@
 langchain-groq>=0.1.0
 langgraph>=0.0.40
+langchain>=0.2.0
 langchain-core>=0.1.0
 python-dotenv>=1.0.0
 mysql-connector-python>=8.0.0
