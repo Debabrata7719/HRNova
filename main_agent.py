@@ -20,8 +20,9 @@ from leave_agent import leave_agent, conversation_memory_store
 class State(TypedDict):
     input: str
     intent: str
-    step: str  # For step-based agents like leave_agent
+    step: str  # For step-based agents like leave_agent and email_agent
     leave_data: dict  # For leave agent workflow
+    email_data: dict  # For email agent workflow
     output: str
     employee_id: int  # For leave agent
     employee_name: str  # For leave agent
@@ -74,8 +75,8 @@ def route_decision(state: State) -> Literal["leave_agent", "email_agent", "route
     Conditional edge function - Routes based on intent AND workflow state
 
     CRITICAL LOGIC:
-    - If leave workflow is active (step != initial/completed),
-      ALWAYS route to leave_agent to continue the multi-step flow
+    - If leave/email workflow is active (step != initial/completed),
+      ALWAYS route to the respective agent to continue the multi-step flow
     - Otherwise, route based on intent
     - Default back to router for unknown intents
 
@@ -89,12 +90,18 @@ def route_decision(state: State) -> Literal["leave_agent", "email_agent", "route
     current_step = state.get("step", "initial")
 
     # CRITICAL: If leave workflow is active, continue with leave_agent
-    # This ensures multi-step workflows don't get interrupted
     if current_intent == "leave_request" and current_step not in [
         "initial",
         "completed",
     ]:
         return "leave_agent"
+
+    # CRITICAL: If email workflow is active, continue with email_agent
+    if current_intent == "email_request" and current_step not in [
+        "initial",
+        "completed",
+    ]:
+        return "email_agent"
 
     # Route based on intent for fresh requests
     if current_intent == "leave_request":
@@ -185,6 +192,7 @@ def main():
         "intent": "",
         "step": "initial",
         "leave_data": {},
+        "email_data": {},
         "output": "",
         "employee_id": 0,
         "employee_name": "",
