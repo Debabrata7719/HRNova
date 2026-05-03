@@ -28,6 +28,7 @@ class State(TypedDict):
     intent: str
     step: str
     leave_data: dict
+    email_data: dict
     output: str
     employee_id: int
     employee_name: str
@@ -38,15 +39,21 @@ class State(TypedDict):
 def router(state: State) -> State:
     """
     Detects intent ONLY (no agent calls)
+    Preserves existing intent if we're in the middle of a workflow
     """
     user_input = state.get("input", "").lower()
+    current_step = state.get("step", "initial")
 
-    if "leave" in user_input:
-        state["intent"] = "leave_request"
-    elif "email" in user_input:
-        state["intent"] = "email_request"
-    else:
-        state["intent"] = "general"
+    # Only detect new intent if starting fresh
+    if current_step == "initial":
+        if "leave" in user_input:
+            state["intent"] = "leave_request"
+        elif "email" in user_input:
+            state["intent"] = "email_request"
+        else:
+            state["intent"] = "general"
+    # If we're already in a workflow, preserve the current intent
+    # (don't override based on keywords that might appear in body text)
 
     return state
 
@@ -116,7 +123,7 @@ def build_graph():
         },
     )
 
-    # Email Agent → End
+    # Email Agent → End (completes in one shot per step)
     builder.add_edge("email_agent", END)
 
     # General Agent → End
@@ -143,6 +150,7 @@ def main():
         "intent": "",
         "step": "initial",
         "leave_data": {},
+        "email_data": {},
         "output": "",
         "employee_id": 0,
         "employee_name": "",
@@ -162,8 +170,8 @@ def main():
             # Update input
             conversation_state["input"] = user_input
 
-            # 🔥 FIXED: Always reset intent safely
-            if conversation_state.get("step") in ["initial", "completed"]:
+            # Only reset intent when starting fresh (step is "initial")
+            if conversation_state.get("step") == "initial":
                 conversation_state["intent"] = ""
 
             # Run graph

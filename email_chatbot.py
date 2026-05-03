@@ -97,17 +97,28 @@ def email_agent(state):
 
     # ==================== STEP 2: ASK FOR MESSAGE BODY ====================
     elif step == "ask_body":
-        if not user_input or len(user_input) < 3:
-            state["output"] = (
-                "Please provide the message content (at least 3 characters)"
-            )
+        if not user_input or len(user_input) < 1:
+            state["output"] = "Please provide the message content"
             state["step"] = "ask_body"
         else:
             # Use the entire user input as the message body
             email_data["body"] = user_input
             state["email_data"] = email_data
-            state["output"] = "Thank you. Let me send the email..."
-            state["step"] = "send_email"
+
+            # Immediately proceed to send the email
+            recipient = email_data.get("recipient", "")
+            body = email_data.get("body", "")
+
+            if recipient and body:
+                subject = "Message"
+                # Actually send the email
+                success, message = send_email(recipient, subject, body)
+                state["output"] = message
+                state["step"] = "completed"
+            else:
+                state["output"] = "Error: Missing recipient. Please start over."
+                state["step"] = "initial"
+                state["email_data"] = {}
 
     # ==================== STEP 3: SEND EMAIL ====================
     elif step == "send_email":
