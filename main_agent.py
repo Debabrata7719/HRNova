@@ -1,4 +1,3 @@
-
 """
 Main router agent using LangGraph and StateGraph
 Routes user input to different agents based on intent
@@ -14,6 +13,7 @@ from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, END
 from email_chatbot import email_agent
 from leave_agent import leave_agent
+from general_agent import general_agent
 from dotenv import load_dotenv
 from langsmith import traceable
 import os
@@ -53,7 +53,9 @@ def router(state: State) -> State:
 
 # ==================== ROUTE DECISION ====================
 @traceable(name="Route Decision")
-def route_decision(state: State) -> Literal["leave_agent", "email_agent"]:
+def route_decision(
+    state: State,
+) -> Literal["leave_agent", "email_agent", "general_agent"]:
     """
     Controls routing between agents
     """
@@ -73,9 +75,11 @@ def route_decision(state: State) -> Literal["leave_agent", "email_agent"]:
         return "leave_agent"
     elif current_intent == "email_request":
         return "email_agent"
+    elif current_intent == "general":
+        return "general_agent"
 
-    # fallback
-    return "email_agent"
+    # fallback to general for unknown intents
+    return "general_agent"
 
 
 # ==================== BUILD GRAPH ====================
@@ -86,6 +90,7 @@ def build_graph():
     builder.add_node("router", router)
     builder.add_node("leave_agent", leave_agent)
     builder.add_node("email_agent", email_agent)
+    builder.add_node("general_agent", general_agent)
 
     # Entry
     builder.set_entry_point("router")
@@ -97,15 +102,14 @@ def build_graph():
         {
             "leave_agent": "leave_agent",
             "email_agent": "email_agent",
+            "general_agent": "general_agent",
         },
     )
 
     # Leave Agent Loop
     builder.add_conditional_edges(
         "leave_agent",
-        lambda state: "leave_agent"
-        if state.get("step") != "completed"
-        else "end",
+        lambda state: "leave_agent" if state.get("step") != "completed" else "end",
         {
             "leave_agent": "leave_agent",
             "end": END,
@@ -115,6 +119,9 @@ def build_graph():
     # Email Agent → End
     builder.add_edge("email_agent", END)
 
+    # General Agent → End
+    builder.add_edge("general_agent", END)
+
     return builder.compile()
 
 
@@ -123,10 +130,10 @@ def main():
     graph = build_graph()
 
     # Create graph folder
-    os.makedirs("graphs", exist_ok=True)
+    # os.makedirs("graphs", exist_ok=True)
 
-    # Show graph structure
-    print(graph.get_graph().draw_mermaid())
+    # # Show graph structure
+    # print(graph.get_graph().draw_mermaid())
 
     print("\n🚀 NovaHR Assistant Started (type 'exit' to quit)\n")
 
