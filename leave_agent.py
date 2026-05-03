@@ -2,10 +2,18 @@
 Leave Management Agent for NovaHR - Simplified Non-LLM Version
 Step-based workflow for processing leave requests
 No LLM dependency to avoid rate limit issues
+Now includes conversation history with ConversationBufferWindowMemory (window: 10)
+Stores memory in State instead of globals
 """
 
 from datetime import datetime, timedelta
 from db_connection import get_db
+from memory_manager import (
+    create_memory_list_from_dict,
+    serialize_memory_for_state,
+    add_user_message_to_memory,
+    add_assistant_message_to_memory,
+)
 
 # Leave policy - days allowed per year
 LEAVE_POLICY = {
@@ -13,42 +21,6 @@ LEAVE_POLICY = {
     "CL": 12,  # Casual Leave
     "SL": 12,  # Sick Leave
 }
-
-# Conversation memory store for multi-turn support
-conversation_memory_store = {}
-
-
-class ConversationMemory:
-    """Manages in-memory conversation history"""
-
-    def __init__(self, employee_id: int, employee_name: str, max_messages: int = 100):
-        self.employee_id = employee_id
-        self.employee_name = employee_name
-        self.messages: list[dict] = []
-        self.max_messages = max_messages
-        self.created_at = datetime.now()
-        self.leave_request = {}  # Store leave details
-
-    def add_message(self, role: str, content: str):
-        """Add message to memory"""
-        self.messages.append({"role": role, "content": content})
-
-        # Keep only recent messages if exceeds max
-        if len(self.messages) > self.max_messages:
-            self.messages = self.messages[-self.max_messages :]
-
-    def set_leave_data(self, **kwargs):
-        """Store leave request details"""
-        self.leave_request.update(kwargs)
-
-    def get_leave_data(self):
-        """Get leave request details"""
-        return self.leave_request
-
-    def clear(self):
-        """Clear memory"""
-        self.messages = []
-        self.leave_request = {}
 
 
 def parse_date(date_input: str) -> str:
@@ -94,32 +66,35 @@ def calculate_days(start_date: str, end_date: str) -> int:
 def leave_agent(state: dict) -> dict:
     """
     Simple rule-based leave request handler (no LLM required)
-    Supports multi-turn conversations with memory
+    Supports multi-turn conversations with memory stored in State
+
+    Uses ConversationBufferWindowMemory with a window size of 10 messages.
+    When the window fills, old messages are automatically summarized before being dropped.
+
+    Args:
+        state: Dictionary containing input, employee_id, employee_name, leave_data, and leave_agent_memory
+
+    Returns:
+        Updated state with output, step, leave_agent_memory, and other fields
     """
     user_input = state.get("input", "").strip().lower()
     employee_id = state.get("employee_id", 0)
     employee_name = state.get("employee_name", "")
     step = state.get("step", "initial")
 
-    # Get or create memory for this employee
-    if employee_id == 0:
-        temp_key = "temp_user"
-        if temp_key not in conversation_memory_store:
-            conversation_memory_store[temp_key] = ConversationMemory(0, "User")
-        memory = conversation_memory_store[temp_key]
-    else:
-        if employee_id not in conversation_memory_store:
-            conversation_memory_store[employee_id] = ConversationMemory(
-                employee_id, employee_name
-            )
-        memory = conversation_memory_store[employee_id]
+    # Extract memory from state (window size: 10)
+    memory_dict = state.get("leave_agent_memory", {})
+    memory = create_memory_list_from_dict(memory_dict)
+    # Ensure correct window size for leave_agent
+    memory.window_size = 10
 
     # Add user input to memory
-    memory.add_message("user", user_input)
+    add_user_message_to_memory(memory, state.get("input", ""))
 
     try:
         # ==================== STEP 1: IDENTIFY EMPLOYEE ====================
         if step == "initial" or step == "identify_employee":
+            # Always ask for name when starting fresh
             if not user_input or step == "initial":
                 response = (
                     "Hi! I'm here to help with your leave request. What's your name?"
@@ -135,8 +110,6 @@ def leave_agent(state: dict) -> dict:
                     emp = result[0]
                     state["employee_id"] = emp["id"]
                     state["employee_name"] = emp["name"]
-                    memory.employee_id = emp["id"]
-                    memory.employee_name = emp["name"]
                     response = f"Great! I found you: {emp['name']}. What type of leave do you need? (EL, CL, or SL)"
                     state["step"] = "ask_leave_type"
                 else:
@@ -154,7 +127,9 @@ def leave_agent(state: dict) -> dict:
                 leave_type = "SL"
 
             if leave_type:
-                memory.set_leave_data(leave_type=leave_type)
+                leave_data = state.get("leave_data", {})
+                leave_data["leave_type"] = leave_type
+                state["leave_data"] = leave_data
                 response = f"Got it, you need {leave_type}. When do you want to take leave? (e.g., '2026-05-05 to 2026-05-06')"
                 state["step"] = "ask_dates"
             else:
@@ -177,9 +152,11 @@ def leave_agent(state: dict) -> dict:
                     if start_date and end_date:
                         days = calculate_days(start_date, end_date)
                         if days > 0:
-                            memory.set_leave_data(
-                                start_date=start_date, end_date=end_date, days=days
-                            )
+                            leave_data = state.get("leave_data", {})
+                            leave_data["start_date"] = start_date
+                            leave_data["end_date"] = end_date
+                            leave_data["days"] = days
+                            state["leave_data"] = leave_data
                             response = f"I see, {days} days from {start_date} to {end_date}. Any reason for this leave?"
                             state["step"] = "ask_reason"
                         else:
@@ -200,7 +177,9 @@ def leave_agent(state: dict) -> dict:
         # ==================== STEP 4: GET REASON ====================
         elif step == "ask_reason":
             if user_input and len(user_input) > 3:
-                memory.set_leave_data(reason=user_input)
+                leave_data = state.get("leave_data", {})
+                leave_data["reason"] = user_input
+                state["leave_data"] = leave_data
                 response = "Thank you. Let me verify your request and submit it..."
                 state["step"] = "confirm_request"
             else:
@@ -209,7 +188,7 @@ def leave_agent(state: dict) -> dict:
 
         # ==================== STEP 5: CONFIRM AND SUBMIT ====================
         elif step == "confirm_request":
-            # Use leave_data from state (persisted by previous steps)
+            # Use leave_data from state
             leave_data = state.get("leave_data", {})
 
             if all(
@@ -274,17 +253,12 @@ def leave_agent(state: dict) -> dict:
         state["step"] = "error"
 
     # Add response to memory
-    memory.add_message("assistant", response)
+    add_assistant_message_to_memory(memory, response)
 
     # Set output
     state["output"] = response
 
-    # Ensure employee info is in state
-    if memory.employee_id > 0:
-        state["employee_id"] = memory.employee_id
-        state["employee_name"] = memory.employee_name
-
-    # Persist leave_data from memory to state for state management
-    state["leave_data"] = memory.get_leave_data()
+    # Serialize memory back to state
+    state["leave_agent_memory"] = serialize_memory_for_state(memory)
 
     return state

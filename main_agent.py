@@ -33,6 +33,14 @@ class State(TypedDict):
     employee_id: int
     employee_name: str
 
+    # ConversationBufferWindowMemory for each sub-agent
+    leave_agent_memory: dict  # Serialized ConversationBufferWindowMemory
+    email_agent_memory: dict  # Serialized ConversationBufferWindowMemory
+    general_agent_memory: dict  # Serialized ConversationBufferWindowMemory
+
+    # For future long-term memory coordination
+    session_summaries: dict  # Summaries of each agent's actions
+
 
 # ==================== ROUTER ====================
 @traceable(name="Router")
@@ -40,12 +48,16 @@ def router(state: State) -> State:
     """
     Detects intent ONLY (no agent calls)
     Preserves existing intent if we're in the middle of a workflow
+    Resets intent when user starts a new request (step is initial or completed)
     """
     user_input = state.get("input", "").lower()
     current_step = state.get("step", "initial")
 
-    # Only detect new intent if starting fresh
-    if current_step == "initial":
+    # Detect new intent when starting fresh or starting new request
+    if current_step in ["initial", "completed"]:
+        # Reset step when starting new request
+        if current_step == "completed":
+            state["step"] = "initial"
         if "leave" in user_input:
             state["intent"] = "leave_request"
         elif "email" in user_input:
@@ -113,15 +125,8 @@ def build_graph():
         },
     )
 
-    # Leave Agent Loop
-    builder.add_conditional_edges(
-        "leave_agent",
-        lambda state: "leave_agent" if state.get("step") != "completed" else "end",
-        {
-            "leave_agent": "leave_agent",
-            "end": END,
-        },
-    )
+    # Leave Agent → End (single pass, step controls flow within agent)
+    builder.add_edge("leave_agent", END)
 
     # Email Agent → End (completes in one shot per step)
     builder.add_edge("email_agent", END)
@@ -142,7 +147,7 @@ def main():
     # # Show graph structure
     # print(graph.get_graph().draw_mermaid())
 
-    print("\n🚀 NovaHR Assistant Started (type 'exit' to quit)\n")
+    print("\nNovaHR Assistant Started (type 'exit' to quit)\n")
 
     # Initial state
     conversation_state: State = {
@@ -154,6 +159,12 @@ def main():
         "output": "",
         "employee_id": 0,
         "employee_name": "",
+        # Initialize memory fields for each sub-agent
+        "leave_agent_memory": {},
+        "email_agent_memory": {},
+        "general_agent_memory": {},
+        # Session summaries for future long-term memory
+        "session_summaries": {},
     }
 
     while True:
@@ -170,9 +181,11 @@ def main():
             # Update input
             conversation_state["input"] = user_input
 
-            # Only reset intent when starting fresh (step is "initial")
-            if conversation_state.get("step") == "initial":
+            # Reset intent when starting fresh (step is initial or completed)
+            if conversation_state.get("step") in ["initial", "completed"]:
                 conversation_state["intent"] = ""
+                if conversation_state.get("step") == "completed":
+                    conversation_state["step"] = "initial"
 
             # Run graph
             result = graph.invoke(conversation_state)
