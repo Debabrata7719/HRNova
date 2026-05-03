@@ -68,5 +68,13 @@ Thumbs.db
 .cache/
 cache/
 
+# ChromaDB
+chroma_db/
+*.sqlite3
+
+# NovaHR specific
+graphs/
+memory_summaries.json
+
 
 plan.md

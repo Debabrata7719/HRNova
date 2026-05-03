@@ -4,8 +4,11 @@ Step-based workflow for processing leave requests
 No LLM dependency to avoid rate limit issues
 Now includes conversation history with ConversationBufferWindowMemory (window: 10)
 Stores memory in State instead of globals
+
+Standalone mode: python leave_agent.py --standalone
 """
 
+import argparse
 from datetime import datetime, timedelta
 from db_connection import get_db
 from memory_manager import (
@@ -61,6 +64,57 @@ def calculate_days(start_date: str, end_date: str) -> int:
         return (end - start).days + 1
     except:
         return -1
+
+
+def check_balance(employee_id: int) -> dict:
+    """
+    Check leave balance for an employee for all leave types.
+
+    Args:
+        employee_id: The employee ID
+
+    Returns:
+        Dict with leave type as key and {used, allowed, remaining} as value
+    """
+    db = get_db()
+    balance = {}
+
+    for leave_type in LEAVE_POLICY:
+        query = """
+        SELECT COALESCE(SUM(days), 0) as total_used
+        FROM leaves
+        WHERE employee_id = %s 
+        AND leave_type = %s 
+        AND status IN ('approved', 'pending_approval')
+        """
+        result = db.execute_query(query, (employee_id, leave_type))
+        used_days = result[0]["total_used"] if result else 0
+        allowed_days = LEAVE_POLICY[leave_type]
+        balance[leave_type] = {
+            "used": used_days,
+            "allowed": allowed_days,
+            "remaining": allowed_days - used_days,
+        }
+
+    return balance
+
+
+def find_employee(name: str) -> dict:
+    """
+    Find employee by name in database.
+
+    Args:
+        name: Employee name (partial match)
+
+    Returns:
+        Dict with employee info or None if not found
+    """
+    db = get_db()
+    query = "SELECT id, name FROM employees WHERE LOWER(name) LIKE %s"
+    result = db.execute_query(query, (f"%{name.lower()}%",))
+    if result:
+        return {"id": result[0]["id"], "name": result[0]["name"]}
+    return None
 
 
 def leave_agent(state: dict) -> dict:
@@ -262,3 +316,247 @@ def leave_agent(state: dict) -> dict:
     state["leave_agent_memory"] = serialize_memory_for_state(memory)
 
     return state
+
+
+def run_standalone():
+    """
+    Standalone CLI for employees - conversational mode like main_agent
+    """
+    print("\n=== NovaHR Leave Assistant (type 'exit' to quit) ===\n")
+
+    # Get employee name
+    employee_name = input("Enter your name: ").strip()
+    if not employee_name:
+        print("Name is required.")
+        return
+
+    emp = find_employee(employee_name)
+    if not emp:
+        print(f"Employee '{employee_name}' not found.")
+        return
+
+    employee_id = emp["id"]
+    print(f"\nWelcome, {emp['name']}!")
+    print("I can help you:\n1. Apply for leave\n2. Check leave balance\n")
+
+    # State for conversational flow
+    state = {
+        "input": "",
+        "step": "initial",
+        "employee_id": employee_id,
+        "employee_name": emp["name"],
+        "leave_data": {},
+        "output": "",
+    }
+
+    while True:
+        user_input = input("\nYou: ").strip()
+
+        if user_input.lower() == "exit":
+            print("Goodbye!")
+            break
+
+        if not user_input:
+            continue
+
+        # Run through leave_agent workflow
+        state["input"] = user_input
+        state = leave_agent_standalone(state)
+
+        # Output response
+        print(f"\nBot: {state['output']}")
+
+        if state.get("step") == "completed":
+            print("\nI can help you:\n1. Apply for leave\n2. Check leave balance\n")
+            state["step"] = "initial"
+
+
+def leave_agent_standalone(state: dict) -> dict:
+    """
+    Conversational leave workflow for standalone mode.
+    Similar to leave_agent but simplified for CLI.
+    """
+    user_input = state.get("input", "").strip().lower()
+    step = state.get("step", "initial")
+    employee_id = state.get("employee_id", 0)
+    leave_data = state.get("leave_data", {})
+
+    # Step 1: Ask what they want to do
+    if step == "initial":
+        if "balance" in user_input or "2" in user_input:
+            balance = check_balance(employee_id)
+            response = "\n--- Your Leave Balance ---\n"
+            for lt in ["EL", "CL", "SL"]:
+                names = {"EL": "Earned", "CL": "Casual", "SL": "Sick"}
+                response += f"{lt} ({names[lt]}): {balance[lt]['used']} used, {balance[lt]['remaining']} remaining out of {balance[lt]['allowed']}\n"
+            state["output"] = response
+            state["step"] = "completed"
+        elif "leave" in user_input or "1" in user_input:
+            state["output"] = "What type of leave do you need? (EL, CL, or SL)"
+            state["step"] = "ask_leave_type"
+        else:
+            state["output"] = (
+                "I can help you apply for leave or check your balance. What would you like?"
+            )
+            state["step"] = "initial"
+
+    # Step 2: Get leave type
+    elif step == "ask_leave_type":
+        leave_type = None
+        if "el" in user_input or "earned" in user_input:
+            leave_type = "EL"
+        elif "cl" in user_input or "casual" in user_input:
+            leave_type = "CL"
+        elif "sl" in user_input or "sick" in user_input:
+            leave_type = "SL"
+
+        if leave_type:
+            leave_data["leave_type"] = leave_type
+            state["leave_data"] = leave_data
+            state["output"] = (
+                f"Got it, {leave_type}. When do you want to take leave? (e.g., '2026-05-05 to 2026-05-06')"
+            )
+            state["step"] = "ask_dates"
+        else:
+            state["output"] = (
+                "Please specify: EL (Earned Leave), CL (Casual Leave), or SL (Sick Leave)"
+            )
+
+    # Step 3: Get dates
+    elif step == "ask_dates":
+        # Handle "tomorrow to", "today to", "from tomorrow to", etc.
+        user_input_clean = user_input.replace("from ", "").strip()
+
+        if " to " in user_input_clean:
+            parts = user_input_clean.split(" to ")
+        elif "-" in user_input_clean:
+            parts = user_input_clean.split("-")
+        else:
+            state["output"] = (
+                "Please provide date range (e.g., 'tomorrow to 2026-05-06' or '2026-05-05 to 2026-05-06')"
+            )
+            return state
+
+        if len(parts) == 2:
+            start_input = parts[0].strip()
+            end_input = parts[1].strip()
+
+            # Parse start date (handle "tomorrow", "today")
+            if start_input == "tomorrow":
+                start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            elif start_input == "today":
+                start_date = datetime.now().strftime("%Y-%m-%d")
+            else:
+                start_date = parse_date(start_input)
+
+            # Parse end date
+            if end_input == "tomorrow":
+                end_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            elif end_input == "today":
+                end_date = datetime.now().strftime("%Y-%m-%d")
+            else:
+                end_date = parse_date(end_input)
+
+            if start_date and end_date:
+                days = calculate_days(start_date, end_date)
+                if days > 0:
+                    leave_data["start_date"] = start_date
+                    leave_data["end_date"] = end_date
+                    leave_data["days"] = days
+                    state["leave_data"] = leave_data
+                    state["output"] = (
+                        f"I see, {days} days from {start_date} to {end_date}. Any reason for this leave?"
+                    )
+                    state["step"] = "submit_request"
+                else:
+                    state["output"] = (
+                        "Invalid date range. Start date must be before end date."
+                    )
+            else:
+                state["output"] = (
+                    "I couldn't parse those dates. Please use format: 'tomorrow to 2026-05-06' or '2026-05-05 to 2026-05-06'"
+                )
+        else:
+            state["output"] = (
+                "Please provide both start and end dates separated by 'to' (e.g., 'tomorrow to 2026-05-06')"
+            )
+
+    # Step 4: Get reason and auto-submit
+    elif step == "submit_request":
+        if user_input and len(user_input) > 3:
+            leave_data["reason"] = user_input
+            state["leave_data"] = leave_data
+
+            # Get leave details
+            leave_type = leave_data.get("leave_type")
+            start_date = leave_data.get("start_date")
+            end_date = leave_data.get("end_date")
+            days = leave_data.get("days")
+            reason = user_input
+
+            if all([leave_type, start_date, end_date, days]):
+                # Check balance
+                balance = check_balance(employee_id)
+                remaining = balance[leave_type]["remaining"]
+
+                if days <= remaining:
+                    # Submit to DB
+                    db = get_db()
+                    insert_query = """
+                    INSERT INTO leaves 
+                    (employee_id, start_date, end_date, leave_type, days, status, reason, submitted_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    db.insert_query(
+                        insert_query,
+                        (
+                            employee_id,
+                            start_date,
+                            end_date,
+                            leave_type,
+                            days,
+                            "pending_approval",
+                            reason,
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        ),
+                    )
+                    new_remaining = remaining - days
+                    state["output"] = (
+                        f"Leave request submitted successfully!\n\n"
+                        f"Type: {leave_type}\n"
+                        f"Dates: {start_date} to {end_date}\n"
+                        f"Days: {days}\n"
+                        f"Remaining {leave_type}: {new_remaining} days"
+                    )
+                    state["step"] = "completed"
+                else:
+                    state["output"] = (
+                        f"Insufficient {leave_type} balance. You have {remaining} days available, but requested {days} days."
+                    )
+                    state["step"] = "completed"
+            else:
+                state["output"] = "Could not submit. Missing information."
+                state["step"] = "completed"
+        else:
+            state["output"] = "Please provide a reason for your leave request."
+
+    else:
+        state["output"] = "I can help you apply for leave or check your balance."
+        state["step"] = "initial"
+
+    return state
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Leave Management Agent")
+    parser.add_argument(
+        "--standalone", action="store_true", help="Run as standalone CLI"
+    )
+    args = parser.parse_args()
+
+    if args.standalone:
+        run_standalone()
+    else:
+        print(
+            "Use --standalone flag for standalone mode: python leave_agent.py --standalone"
+        )

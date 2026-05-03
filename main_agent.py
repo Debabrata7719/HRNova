@@ -1,12 +1,13 @@
 """
 Main router agent using LangGraph and StateGraph
 Routes user input to different agents based on intent
-Supports: email requests, leave requests
+Supports: email requests, leave requests, employee queries
 
 Now includes:
 - Proper LangGraph routing
 - LangSmith tracing
 - Clean state handling
+- Query agent for employee balance/policy questions
 """
 
 from typing import TypedDict, Literal
@@ -14,6 +15,7 @@ from langgraph.graph import StateGraph, END
 from email_chatbot import email_agent
 from leave_agent import leave_agent
 from general_agent import general_agent
+from query_agent import query_agent as employee_query_agent
 from dotenv import load_dotenv
 from langsmith import traceable
 import os
@@ -37,6 +39,7 @@ class State(TypedDict):
     leave_agent_memory: dict  # Serialized ConversationBufferWindowMemory
     email_agent_memory: dict  # Serialized ConversationBufferWindowMemory
     general_agent_memory: dict  # Serialized ConversationBufferWindowMemory
+    query_agent_memory: dict  # Serialized ConversationBufferWindowMemory
 
     # For future long-term memory coordination
     session_summaries: dict  # Summaries of each agent's actions
@@ -58,7 +61,10 @@ def router(state: State) -> State:
         # Reset step when starting new request
         if current_step == "completed":
             state["step"] = "initial"
-        if "leave" in user_input:
+        # Check for query intents first (higher priority)
+        if "balance" in user_input or "policy" in user_input:
+            state["intent"] = "query_request"
+        elif "leave" in user_input:
             state["intent"] = "leave_request"
         elif "email" in user_input:
             state["intent"] = "email_request"
@@ -74,7 +80,7 @@ def router(state: State) -> State:
 @traceable(name="Route Decision")
 def route_decision(
     state: State,
-) -> Literal["leave_agent", "email_agent", "general_agent"]:
+) -> Literal["leave_agent", "email_agent", "query_agent", "general_agent"]:
     """
     Controls routing between agents
     """
@@ -82,18 +88,27 @@ def route_decision(
     current_intent = state.get("intent", "")
     current_step = state.get("step", "initial")
 
-    # 🔥 Continue leave workflow if active
+    # Continue leave workflow if active
     if current_intent == "leave_request" and current_step not in [
         "initial",
         "completed",
     ]:
         return "leave_agent"
 
-    # 🔥 Fresh routing
+    # Continue query workflow if active
+    if current_intent == "query_request" and current_step not in [
+        "initial",
+        "completed",
+    ]:
+        return "query_agent"
+
+    # Fresh routing
     if current_intent == "leave_request":
         return "leave_agent"
     elif current_intent == "email_request":
         return "email_agent"
+    elif current_intent == "query_request":
+        return "query_agent"
     elif current_intent == "general":
         return "general_agent"
 
@@ -109,6 +124,7 @@ def build_graph():
     builder.add_node("router", router)
     builder.add_node("leave_agent", leave_agent)
     builder.add_node("email_agent", email_agent)
+    builder.add_node("query_agent", employee_query_agent)
     builder.add_node("general_agent", general_agent)
 
     # Entry
@@ -121,15 +137,19 @@ def build_graph():
         {
             "leave_agent": "leave_agent",
             "email_agent": "email_agent",
+            "query_agent": "query_agent",
             "general_agent": "general_agent",
         },
     )
 
-    # Leave Agent → End (single pass, step controls flow within agent)
+    # Leave Agent → End
     builder.add_edge("leave_agent", END)
 
-    # Email Agent → End (completes in one shot per step)
+    # Email Agent → End
     builder.add_edge("email_agent", END)
+
+    # Query Agent → End
+    builder.add_edge("query_agent", END)
 
     # General Agent → End
     builder.add_edge("general_agent", END)
@@ -163,6 +183,7 @@ def main():
         "leave_agent_memory": {},
         "email_agent_memory": {},
         "general_agent_memory": {},
+        "query_agent_memory": {},
         # Session summaries for future long-term memory
         "session_summaries": {},
     }
