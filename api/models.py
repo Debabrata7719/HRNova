@@ -5,12 +5,9 @@ from typing import Optional
 
 
 class ChatRequest(BaseModel):
-    """Request model for chat endpoint"""
+    """Request model for chat endpoint - role/employee info comes from JWT token"""
     message: str
     session_id: str
-    role: str = "hr"  # "hr" or "employee" — no auth for now, just pass role
-    employee_id: int = 0
-    employee_name: str = ""
 
 
 class ChatResponse(BaseModel):
