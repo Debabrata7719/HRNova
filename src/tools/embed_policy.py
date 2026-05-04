@@ -12,7 +12,10 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 load_dotenv()
 
-PDF_PATH = "NovaHR_Company_Policy_Notebook.pdf"
+# Get base directory (project root)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PDF_PATH = os.path.join(BASE_DIR, "data", "NovaHR_Company_Policy_Notebook.pdf")
+DB_DIRECTORY = os.path.join(BASE_DIR, "data", "chroma_db")
 COLLECTION_NAME = "novahr_policy"
 
 
@@ -250,16 +253,16 @@ def embed_policy():
     )
 
     # Create chroma_db directory if not exists
-    os.makedirs("chroma_db", exist_ok=True)
+    os.makedirs(DB_DIRECTORY, exist_ok=True)
 
-    # Store in ChromaDB (persistent in project directory)
+    # Store in ChromaDB (persistent in data directory)
     print("Storing in ChromaDB...")
     db = Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
         metadatas=metadatas,
         collection_name=COLLECTION_NAME,
-        persist_directory="./chroma_db",
+        persist_directory=DB_DIRECTORY,
     )
 
     print(f"Successfully embedded {len(chunks)} chunks into ChromaDB")

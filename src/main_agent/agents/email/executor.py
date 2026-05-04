@@ -9,12 +9,13 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
-from memory_manager import (
+from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
     add_user_message_to_memory,
     add_assistant_message_to_memory,
 )
+from langsmith import traceable
 import re
 
 # Load environment variables
@@ -59,6 +60,7 @@ def send_email(recipient: str, subject: str, body: str) -> tuple[bool, str]:
         return False, f"Failed to send email: {str(e)}"
 
 
+@traceable(name="Email Agent")
 def email_agent(state):
     """
     Handle email-related requests with multi-step workflow and conversation memory.

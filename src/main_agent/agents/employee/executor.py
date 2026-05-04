@@ -1,14 +1,14 @@
 """
 Employee Agent - Main interface for employees
 Connects leave_agent (for leave applications) and query_agent (for policy/balance queries)
-Run standalone: python employee_agent.py
+Run standalone: python run_employee_agent.py
 """
 
 import argparse
-from db_connection import get_db
-from query_agent import query_agent
-from leave_agent import leave_agent_standalone, find_employee, check_balance
-from memory_manager import (
+from src.tools.db_connection import get_db
+from src.main_agent.agents.query.executor import query_agent
+from src.main_agent.agents.leave.executor import leave_agent_standalone, find_employee, check_balance
+from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
     add_user_message_to_memory,
@@ -75,20 +75,22 @@ def run_employee_agent():
         if current_agent is None:
             user_lower = user_input.lower()
 
-            # Check if wants leave
-            if "1" in user_input or "leave" in user_lower or "apply" in user_lower:
+            # Check if wants leave (only for explicit leave application)
+            if "1" in user_input or "apply" in user_lower:
                 current_agent = "leave"
                 leave_state["step"] = "initial"
                 user_input = "apply leave"  # Start leave flow
                 print("\n[Leave Application Mode]")
 
-            # Check if wants query
+            # Check if wants query (policy, balance, status)
             elif (
                 "2" in user_input
                 or "ask" in user_lower
                 or "question" in user_lower
                 or "policy" in user_lower
                 or "balance" in user_lower
+                or "status" in user_lower
+                or "approved" in user_lower
             ):
                 current_agent = "query"
                 print("\n[Query Mode]")
@@ -137,4 +139,4 @@ if __name__ == "__main__":
     if args.standalone or True:  # Default to standalone
         run_employee_agent()
     else:
-        print("Use --standalone flag: python employee_agent.py --standalone")
+        print("Use --standalone flag: python run_employee_agent.py --standalone")

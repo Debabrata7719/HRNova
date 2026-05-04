@@ -1,21 +1,23 @@
 """
 Main router agent using LangGraph and StateGraph
 Routes user input to different agents based on intent
-Supports: email requests, leave requests, employee queries
+Supports: email requests, leave requests, employee queries, scheduling
 
 Now includes:
 - Proper LangGraph routing
 - LangSmith tracing
 - Clean state handling
 - Query agent for employee balance/policy questions
+- Schedule agent for Google Calendar integration
 """
 
 from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, END
-from email_chatbot import email_agent
-from leave_agent import leave_agent
-from general_agent import general_agent
-from query_agent import query_agent as employee_query_agent
+from src.main_agent.agents.email.executor import email_agent
+from src.main_agent.agents.leave.executor import leave_agent
+from src.main_agent.agents.general.executor import general_agent
+from src.main_agent.agents.query.executor import query_agent as employee_query_agent
+from src.main_agent.agents.scheduling.executor import schedule_agent
 from dotenv import load_dotenv
 from langsmith import traceable
 import os
@@ -31,15 +33,23 @@ class State(TypedDict):
     step: str
     leave_data: dict
     email_data: dict
+    schedule_data: dict
     output: str
     employee_id: int
     employee_name: str
+
+    # Schedule agent fields
+    schedule_title: str
+    schedule_date: str
+    schedule_time: str
+    schedule_description: str
 
     # ConversationBufferWindowMemory for each sub-agent
     leave_agent_memory: dict  # Serialized ConversationBufferWindowMemory
     email_agent_memory: dict  # Serialized ConversationBufferWindowMemory
     general_agent_memory: dict  # Serialized ConversationBufferWindowMemory
     query_agent_memory: dict  # Serialized ConversationBufferWindowMemory
+    schedule_agent_memory: dict  # Serialized ConversationBufferWindowMemory
 
     # For future long-term memory coordination
     session_summaries: dict  # Summaries of each agent's actions
@@ -61,8 +71,15 @@ def router(state: State) -> State:
         # Reset step when starting new request
         if current_step == "completed":
             state["step"] = "initial"
-        # Check for query intents first (higher priority)
-        if "balance" in user_input or "policy" in user_input:
+        # Check for schedule intents first (highest priority)
+        if (
+            "schedule" in user_input
+            or "meeting" in user_input
+            or "calendar" in user_input
+        ):
+            state["intent"] = "schedule_request"
+        # Check for query intents
+        elif "balance" in user_input or "policy" in user_input:
             state["intent"] = "query_request"
         elif "leave" in user_input:
             state["intent"] = "leave_request"
@@ -80,7 +97,9 @@ def router(state: State) -> State:
 @traceable(name="Route Decision")
 def route_decision(
     state: State,
-) -> Literal["leave_agent", "email_agent", "query_agent", "general_agent"]:
+) -> Literal[
+    "leave_agent", "email_agent", "query_agent", "schedule_agent", "general_agent"
+]:
     """
     Controls routing between agents
     """
@@ -102,6 +121,13 @@ def route_decision(
     ]:
         return "query_agent"
 
+    # Continue schedule workflow if active
+    if current_intent == "schedule_request" and current_step not in [
+        "initial",
+        "completed",
+    ]:
+        return "schedule_agent"
+
     # Fresh routing
     if current_intent == "leave_request":
         return "leave_agent"
@@ -109,6 +135,8 @@ def route_decision(
         return "email_agent"
     elif current_intent == "query_request":
         return "query_agent"
+    elif current_intent == "schedule_request":
+        return "schedule_agent"
     elif current_intent == "general":
         return "general_agent"
 
@@ -125,6 +153,7 @@ def build_graph():
     builder.add_node("leave_agent", leave_agent)
     builder.add_node("email_agent", email_agent)
     builder.add_node("query_agent", employee_query_agent)
+    builder.add_node("schedule_agent", schedule_agent)
     builder.add_node("general_agent", general_agent)
 
     # Entry
@@ -138,6 +167,7 @@ def build_graph():
             "leave_agent": "leave_agent",
             "email_agent": "email_agent",
             "query_agent": "query_agent",
+            "schedule_agent": "schedule_agent",
             "general_agent": "general_agent",
         },
     )
@@ -151,76 +181,10 @@ def build_graph():
     # Query Agent → End
     builder.add_edge("query_agent", END)
 
+    # Schedule Agent → End
+    builder.add_edge("schedule_agent", END)
+
     # General Agent → End
     builder.add_edge("general_agent", END)
 
     return builder.compile()
-
-
-# ==================== MAIN LOOP ====================
-def main():
-    graph = build_graph()
-
-    # Create graph folder
-    # os.makedirs("graphs", exist_ok=True)
-
-    # # Show graph structure
-    # print(graph.get_graph().draw_mermaid())
-
-    print("\nNovaHR Assistant Started (type 'exit' to quit)\n")
-
-    # Initial state
-    conversation_state: State = {
-        "input": "",
-        "intent": "",
-        "step": "initial",
-        "leave_data": {},
-        "email_data": {},
-        "output": "",
-        "employee_id": 0,
-        "employee_name": "",
-        # Initialize memory fields for each sub-agent
-        "leave_agent_memory": {},
-        "email_agent_memory": {},
-        "general_agent_memory": {},
-        "query_agent_memory": {},
-        # Session summaries for future long-term memory
-        "session_summaries": {},
-    }
-
-    while True:
-        user_input = input("\nYou: ").strip()
-
-        if user_input.lower() == "exit":
-            print("Goodbye!")
-            break
-
-        if not user_input:
-            continue
-
-        try:
-            # Update input
-            conversation_state["input"] = user_input
-
-            # Reset intent when starting fresh (step is initial or completed)
-            if conversation_state.get("step") in ["initial", "completed"]:
-                conversation_state["intent"] = ""
-                if conversation_state.get("step") == "completed":
-                    conversation_state["step"] = "initial"
-
-            # Run graph
-            result = graph.invoke(conversation_state)
-
-            # Update state
-            conversation_state = result
-
-            # Output
-            print(f"\nBot: {result['output']}")
-
-        except Exception as e:
-            print(f"Error: {e}")
-
-
-# ==================== RUN ====================
-if __name__ == "__main__":
-    main()

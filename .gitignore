@@ -69,7 +69,7 @@ Thumbs.db
 cache/
 
 # ChromaDB
-chroma_db/
+data/chroma_db/
 *.sqlite3
 
 # NovaHR specific

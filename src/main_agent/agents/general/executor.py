@@ -7,12 +7,13 @@ Now includes conversation history with ConversationBufferWindowMemory (window: 7
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
-from memory_manager import (
+from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
     add_user_message_to_memory,
     add_assistant_message_to_memory,
 )
+from langsmith import traceable
 import os
 
 # Load environment variables
@@ -29,6 +30,7 @@ Keep responses concise and friendly (1-2 sentences).
 If the user seems to want help with a task (leave requests, emails, etc.), suggest they can ask you directly for those tasks."""
 
 
+@traceable(name="General Agent")
 def general_agent(state):
     """
     Handle general conversation with users using LLM with conversation memory.

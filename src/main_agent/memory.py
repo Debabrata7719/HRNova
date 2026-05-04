@@ -16,7 +16,7 @@ load_dotenv()
 
 # Initialize Groq LLM for summarization
 summarizer_llm = ChatGroq(
-    model="llama-3.1-8b-instant",
+    model="llama-3.3-70b-versatile",
     temperature=0.3,
     max_tokens=100,  # Limit output for faster summarization
     api_key=os.getenv("GROQ_API_KEY"),
@@ -151,6 +151,8 @@ class ConversationBufferWindowMemory:
                 pass
 
         return result
+
+    def get_messages(self, include_summary: bool = False) -> list:
         """
         Get all messages in the current buffer.
         Optionally includes context about summarized messages.

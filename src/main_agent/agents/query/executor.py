@@ -9,13 +9,14 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from db_connection import get_db
-from memory_manager import (
+from src.tools.db_connection import get_db
+from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
     add_user_message_to_memory,
     add_assistant_message_to_memory,
 )
+from langsmith import traceable
 
 load_dotenv()
 
@@ -28,7 +29,9 @@ llm = ChatGroq(
 
 # ChromaDB settings
 COLLECTION_NAME = "novahr_policy"
-DB_DIRECTORY = "./chroma_db"
+# Get base directory (project root)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+DB_DIRECTORY = os.path.join(BASE_DIR, "data", "chroma_db")
 
 # Leave types and their limits
 LEAVE_POLICY = {
@@ -96,6 +99,32 @@ def format_balance_response(balance: dict) -> str:
     return response
 
 
+def get_leave_status(employee_id: int) -> list:
+    """Get all leave requests for employee (approved + pending + rejected)"""
+    db = get_db()
+    query = """
+    SELECT start_date, end_date, leave_type, days, status, reason, submitted_at
+    FROM leaves 
+    WHERE employee_id = %s
+    ORDER BY submitted_at DESC
+    """
+    result = db.execute_query(query, (employee_id,))
+    return result if result else []
+
+
+def format_status_response(leaves: list) -> str:
+    """Format leave status as readable response"""
+    if not leaves:
+        return "You have no leave requests on record."
+
+    response = "Your Leave Requests:\n"
+    for i, leave in enumerate(leaves, 1):
+        status = leave["status"].upper().replace("_", " ")
+        response += f"{i}. {leave['start_date']} to {leave['end_date']} ({leave['leave_type']}) - {leave['days']} day(s) - {status}\n"
+        response += f"   Reason: {leave['reason']}\n"
+    return response
+
+
 SYSTEM_PROMPT = """You are a helpful HR Query Assistant. 
 Answer employee questions about company policies and leave balance.
 
@@ -107,6 +136,7 @@ Rules:
 5. If referring to policy, mention the source"""
 
 
+@traceable(name="Query Agent")
 def query_agent(state: dict) -> dict:
     """
     Handle policy and leave balance queries.
@@ -145,7 +175,7 @@ def query_agent(state: dict) -> dict:
                     return state
 
                 # Search for employee
-                from leave_agent import find_employee
+                from src.main_agent.agents.leave.executor import find_employee
 
                 emp = find_employee(user_input)
                 if emp:
@@ -192,7 +222,6 @@ def query_agent(state: dict) -> dict:
                 state["query_agent_memory"] = serialize_memory_for_state(memory)
                 state["step"] = "completed"
                 return state
-                return state
 
         # Check if asking about leave balance
         if any(
@@ -209,6 +238,26 @@ def query_agent(state: dict) -> dict:
                     response = "Please provide your name first to check leave balance."
             else:
                 response = "I can check your leave balance. Please provide your name."
+
+        # Check if asking about leave status (approved/pending/rejected)
+        elif any(
+            word in user_lower
+            for word in [
+                "status",
+                "approved",
+                "pending",
+                "rejected",
+                "my leave",
+                "leave request",
+                "is it approved",
+                "is my leave",
+            ]
+        ):
+            if employee_id:
+                leaves = get_leave_status(employee_id)
+                response = format_status_response(leaves)
+            else:
+                response = "Please provide your name first to check leave status."
 
         # Check if asking about specific leave type balance
         elif any(
@@ -265,28 +314,3 @@ def query_agent(state: dict) -> dict:
     state["step"] = "completed"
 
     return state
-
-
-if __name__ == "__main__":
-    # Test standalone
-    print("Testing Query Agent\n")
-
-    # Test 1: Check balance
-    print("1. Testing leave balance check...")
-    state = {
-        "input": "what is my leave balance",
-        "employee_id": 1,
-        "query_agent_memory": {},
-    }
-    state = query_agent(state)
-    print(f"Response: {state['output']}\n")
-
-    # Test 2: Policy query
-    print("2. Testing policy query...")
-    state = {
-        "input": "what is the casual leave policy",
-        "employee_id": 0,
-        "query_agent_memory": {},
-    }
-    state = query_agent(state)
-    print(f"Response: {state['output'][:500]}...")

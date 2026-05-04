@@ -5,18 +5,19 @@ No LLM dependency to avoid rate limit issues
 Now includes conversation history with ConversationBufferWindowMemory (window: 10)
 Stores memory in State instead of globals
 
-Standalone mode: python leave_agent.py --standalone
+Standalone mode: python run_main_agent.py (or use employee_agent)
 """
 
 import argparse
 from datetime import datetime, timedelta
-from db_connection import get_db
-from memory_manager import (
+from src.tools.db_connection import get_db
+from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
     add_user_message_to_memory,
     add_assistant_message_to_memory,
 )
+from langsmith import traceable
 
 # Leave policy - days allowed per year
 LEAVE_POLICY = {
@@ -100,23 +101,16 @@ def check_balance(employee_id: int) -> dict:
 
 
 def find_employee(name: str) -> dict:
-    """
-    Find employee by name in database.
-
-    Args:
-        name: Employee name (partial match)
-
-    Returns:
-        Dict with employee info or None if not found
-    """
+    """Find employee by name"""
     db = get_db()
-    query = "SELECT id, name FROM employees WHERE LOWER(name) LIKE %s"
-    result = db.execute_query(query, (f"%{name.lower()}%",))
+    query = "SELECT id, name, email, department FROM employees WHERE name = %s"
+    result = db.execute_query(query, (name,))
     if result:
         return {"id": result[0]["id"], "name": result[0]["name"]}
     return None
 
 
+@traceable(name="Leave Agent")
 def leave_agent(state: dict) -> dict:
     """
     Simple rule-based leave request handler (no LLM required)
@@ -318,59 +312,6 @@ def leave_agent(state: dict) -> dict:
     return state
 
 
-def run_standalone():
-    """
-    Standalone CLI for employees - conversational mode like main_agent
-    """
-    print("\n=== NovaHR Leave Assistant (type 'exit' to quit) ===\n")
-
-    # Get employee name
-    employee_name = input("Enter your name: ").strip()
-    if not employee_name:
-        print("Name is required.")
-        return
-
-    emp = find_employee(employee_name)
-    if not emp:
-        print(f"Employee '{employee_name}' not found.")
-        return
-
-    employee_id = emp["id"]
-    print(f"\nWelcome, {emp['name']}!")
-    print("I can help you:\n1. Apply for leave\n2. Check leave balance\n")
-
-    # State for conversational flow
-    state = {
-        "input": "",
-        "step": "initial",
-        "employee_id": employee_id,
-        "employee_name": emp["name"],
-        "leave_data": {},
-        "output": "",
-    }
-
-    while True:
-        user_input = input("\nYou: ").strip()
-
-        if user_input.lower() == "exit":
-            print("Goodbye!")
-            break
-
-        if not user_input:
-            continue
-
-        # Run through leave_agent workflow
-        state["input"] = user_input
-        state = leave_agent_standalone(state)
-
-        # Output response
-        print(f"\nBot: {state['output']}")
-
-        if state.get("step") == "completed":
-            print("\nI can help you:\n1. Apply for leave\n2. Check leave balance\n")
-            state["step"] = "initial"
-
-
 def leave_agent_standalone(state: dict) -> dict:
     """
     Conversational leave workflow for standalone mode.
@@ -545,18 +486,3 @@ def leave_agent_standalone(state: dict) -> dict:
         state["step"] = "initial"
 
     return state
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Leave Management Agent")
-    parser.add_argument(
-        "--standalone", action="store_true", help="Run as standalone CLI"
-    )
-    args = parser.parse_args()
-
-    if args.standalone:
-        run_standalone()
-    else:
-        print(
-            "Use --standalone flag for standalone mode: python leave_agent.py --standalone"
-        )
