@@ -1,303 +1,457 @@
-# NovaHR Assistant
+# NovaHR - AI-Powered HR Assistant
 
-AI-powered HR chatbot built with LangGraph, LangChain, and Groq LLM.
+> Complete HR management system with AI chatbot, leave management, email automation, calendar scheduling, and policy Q&A.
 
-## Features
+---
 
-- **Leave Management**: Apply for leave, check balance, view status
-- **Email Sending**: Send emails via Gmail SMTP
-- **Policy Q&A**: Query company policies using ChromaDB vector search
-- **Meeting Scheduling**: Schedule Google Calendar events
-- **General Chat**: Conversational AI for HR queries
+## 🚀 Features
 
-## Project Structure
+### 🤖 AI Assistant
+- **Multi-Agent System** — LangGraph-powered routing to specialized agents
+- **Leave Management** — Apply for leave with natural language
+- **Email Automation** — Compose and send emails via Gmail SMTP
+- **Calendar Integration** — Schedule meetings with Google Calendar
+- **Policy Q&A** — ChromaDB vector search over company policy documents
+- **Leave Balance Queries** — Real-time balance checks from MySQL
+
+### 👔 HR Dashboard
+- **Leave Request Management** — View all employee leave requests
+- **Approve/Reject** — One-click approval/rejection with instant updates
+- **Statistics** — Real-time counts (Total, Pending, Approved, Rejected)
+- **Filter & Search** — Filter by status, search by employee
+
+### 🔐 Authentication & Security
+- **JWT Token-based Auth** — Secure login with bcrypt password hashing
+- **Role-based Access** — HR and Employee roles with different permissions
+- **Session Management** — Stateful conversations with per-user sessions
+
+### 🌐 REST API
+- **FastAPI Backend** — Auto-generated Swagger docs at `/docs`
+- **CORS Enabled** — Ready for frontend integration
+- **Protected Endpoints** — JWT verification on all sensitive routes
+
+---
+
+## 📁 Project Structure
 
 ```
 NovaHR/
-├── .env                           # Environment variables
-├── .gitignore
-├── requirements.txt
-├── run_main_agent.py              # Main HR agent (router)
-├── run_employee_agent.py          # Employee portal
-├── Credentials.json               # Google OAuth credentials
-├── token.json                     # Google OAuth token
+├── api/                          # FastAPI backend
+│   ├── dependencies/
+│   │   └── auth.py              # JWT verification
+│   ├── routers/
+│   │   ├── auth.py              # Login endpoint
+│   │   ├── chat.py              # Chat with AI agent
+│   │   └── leaves.py            # Leave management (HR only)
+│   ├── main.py                  # FastAPI app
+│   └── models.py                # Pydantic models
 │
-├── data/
-│   ├── NovaHR_Company_Policy_Notebook.pdf
-│   └── chroma_db/                 # Vector database
+├── auth/
+│   ├── auth.py                  # Login logic + JWT creation
+│   └── setup_auth.py            # Database setup script
 │
 ├── src/
 │   ├── main_agent/
-│   │   ├── memory.py              # ConversationBufferWindowMemory
-│   │   ├── router.py              # LangGraph routing logic
-│   │   │
-│   │   └── agents/
-│   │       ├── email/executor.py
-│   │       ├── leave/executor.py
-│   │       ├── scheduling/executor.py
-│   │       ├── query/executor.py
-│   │       ├── employee/executor.py
-│   │       └── general/executor.py
-│   │
+│   │   ├── agents/
+│   │   │   ├── email/           # Email agent
+│   │   │   ├── leave/           # Leave agent
+│   │   │   ├── query/           # Policy Q&A agent
+│   │   │   ├── schedule/        # Calendar agent
+│   │   │   ├── employee/        # Employee portal
+│   │   │   └── general/         # General conversation
+│   │   ├── memory.py            # Conversation memory
+│   │   └── router.py            # LangGraph routing
 │   └── tools/
-│       ├── db_connection.py       # MySQL utility
-│       └── embed_policy.py        # PDF embedder
+│       ├── db_connection.py     # MySQL utility
+│       └── embed_policy.py      # PDF embedder
 │
-└── tests/
-    └── test_connections.py        # Connection tests
+├── novahr-frontend/             # React frontend
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── Login.jsx        # Login page
+│   │   │   ├── Chat.jsx         # AI chat interface
+│   │   │   └── Dashboard.jsx   # HR dashboard
+│   │   ├── services/
+│   │   │   ├── authService.js   # Login/logout
+│   │   │   ├── chatService.js   # Chat API
+│   │   │   └── leaveService.js  # Leave API
+│   │   └── utils/
+│   │       └── session.js       # Session ID generation
+│   └── package.json
+│
+├── data/
+│   ├── NovaHR_Company_Policy_Notebook.pdf
+│   └── chroma_db/               # Vector database
+│
+├── .env                         # Environment variables
+├── requirements.txt             # Python dependencies
+├── start_api.py                 # API server launcher
+├── run_main_agent.py            # CLI for HR
+└── run_employee_agent.py        # CLI for employees
+
 ```
 
-## Tech Stack
+---
 
-- **LLM**: Groq (llama-3.3-70b-versatile)
-- **Framework**: LangGraph, LangChain
-- **Database**: MySQL (employee/leave data)
-- **Vector DB**: ChromaDB (policy embeddings)
-- **Email**: Gmail SMTP
-- **Calendar**: Google Calendar API
-- **Tracing**: LangSmith
+## 🛠 Installation
 
-## Setup
+### Prerequisites
+- Python 3.9+
+- Node.js 16+
+- MySQL 8.0+
+- Gmail account (for email features)
+- Google Cloud project (for calendar features)
 
-### 1. Install Dependencies
-
+### 1. Clone Repository
 ```bash
+git clone <your-repo-url>
+cd NovaHR
+```
+
+### 2. Backend Setup
+
+#### Install Python Dependencies
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
-
+#### Configure Environment Variables
 Create `.env` file:
-
 ```env
-# Groq API
+# LLM API
 GROQ_API_KEY=your_groq_api_key
 
-# Email
+# Email (Gmail)
 EMAIL_ADDRESS=your_email@gmail.com
 EMAIL_APP_PASSWORD=your_app_password
 
-# MySQL
+# MySQL Database
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_password
 DB_NAME=novahr
 
+# JWT Secret
+SECRET_KEY=your_super_secret_key_here
+
 # LangSmith (optional)
 LANGCHAIN_API_KEY=your_langsmith_key
 LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=NovaHR
+LANGCHAIN_PROJECT=novahr
 ```
 
-### 3. Setup MySQL Database
-
+#### Setup MySQL Database
 ```sql
 CREATE DATABASE novahr;
+USE novahr;
 
+-- Create employees table
 CREATE TABLE employees (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100),
-    email VARCHAR(100),
+    email VARCHAR(100) UNIQUE,
     department VARCHAR(100),
-    role VARCHAR(100)
+    password VARCHAR(255),
+    auth_role VARCHAR(20)
 );
 
+-- Create leaves table
 CREATE TABLE leaves (
-    leave_id INT AUTO_INCREMENT PRIMARY KEY,
+    leave_id INT PRIMARY KEY AUTO_INCREMENT,
     employee_id INT,
+    leave_type VARCHAR(10),
     start_date DATE,
     end_date DATE,
-    leave_type VARCHAR(10),
     days INT,
-    status VARCHAR(20),
+    status VARCHAR(20) DEFAULT 'pending',
     reason TEXT,
-    submitted_at DATETIME,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (employee_id) REFERENCES employees(id)
 );
+
+-- Insert sample employees
+INSERT INTO employees (name, email, department, auth_role) VALUES
+('Debu', 'debu@gmail.com', 'Engineering', 'HR'),
+('Rahul', 'rahul@gmail.com', 'HR', 'EMPLOYEE'),
+('Priya', 'priya@gmail.com', 'Marketing', 'EMPLOYEE');
 ```
 
-### 4. Embed Policy Document
+#### Setup Authentication
+```bash
+python auth/setup_auth.py
+```
+This will hash passwords and set default credentials:
+- HR: `debu@gmail.com` / `721242`
+- Employees: `rahul@gmail.com` / `123`
 
+#### Embed Company Policy
 ```bash
 python src/tools/embed_policy.py
 ```
 
-This will:
-- Load `data/NovaHR_Company_Policy_Notebook.pdf`
-- Split into chunks
-- Create embeddings using sentence-transformers
-- Store in `data/chroma_db/`
-
-### 5. Test Connections
-
+### 3. Frontend Setup
 ```bash
-python tests/test_connections.py
+cd novahr-frontend
+npm install
 ```
 
-Should show:
+---
+
+## 🚀 Running the Application
+
+### Start Backend (Terminal 1)
+```bash
+python start_api.py
 ```
-✓ MySQL: PASS
-✓ Groq API: PASS
-✓ Email: PASS
-✓ ChromaDB: PASS
-✓ Google Calendar: PASS
+API will run at `http://localhost:8000`
+- Swagger docs: `http://localhost:8000/docs`
+
+### Start Frontend (Terminal 2)
+```bash
+cd novahr-frontend
+npm start
 ```
+Frontend will run at `http://localhost:3000`
 
-## Usage
+---
 
-### Option 1: CLI Interface
+## 📖 Usage
 
-#### For HR Staff (All Features)
+### Web Interface
 
+#### Login
+- Go to `http://localhost:3000`
+- Login with credentials:
+  - **HR:** `debu@gmail.com` / `721242`
+  - **Employee:** `rahul@gmail.com` / `123`
+
+#### Chat with AI Assistant
+- Ask questions: "What is my leave balance?"
+- Apply for leave: "I want to apply for leave"
+- Schedule meetings: "Schedule a meeting tomorrow at 3pm"
+- Check policy: "What is the casual leave policy?"
+
+#### HR Dashboard (HR only)
+- Navigate to `http://localhost:3000/dashboard`
+- View all leave requests
+- Approve/reject with one click
+- Filter by status (All, Pending, Approved, Rejected)
+
+### CLI Interface
+
+#### HR Agent (Full Access)
 ```bash
 python run_main_agent.py
 ```
 
-Features:
-- Leave requests
-- Email sending
-- Policy queries
-- Meeting scheduling
-- General chat
-
-#### For Employees (Leave + Queries)
-
+#### Employee Portal (Leave + Queries)
 ```bash
 python run_employee_agent.py
 ```
 
-Features:
-- Apply for leave
-- Check leave balance
-- View leave status
-- Ask policy questions
+---
 
-### Option 2: REST API
+## 🔌 API Endpoints
 
-#### Start the API Server
+### Authentication
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/auth/login` | Login and get JWT token |
 
+### Chat
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/chat` | ✓ | Send message to AI agent |
+| `GET` | `/api/chat/session/{id}` | ✓ | Get session info |
+| `DELETE` | `/api/chat/session/{id}` | ✓ | Clear session |
+
+### Leave Management (HR Only)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/leaves` | ✓ HR | Get all leave requests |
+| `GET` | `/api/leaves/stats` | ✓ HR | Get leave statistics |
+| `PUT` | `/api/leaves/{id}/approve` | ✓ HR | Approve leave |
+| `PUT` | `/api/leaves/{id}/reject` | ✓ HR | Reject leave |
+
+Full API documentation: `http://localhost:8000/docs`
+
+---
+
+## 🧪 Testing
+
+### Test Database Connection
 ```bash
-uvicorn api.main:app --reload --port 8000
-```
-
-#### Access Swagger UI
-
-Open your browser: `http://localhost:8000/docs`
-
-#### API Features
-
-- ✅ RESTful endpoints for chat
-- ✅ Session management
-- ✅ CORS enabled for frontend integration
-- ✅ Auto-generated API documentation
-- ✅ No authentication (development mode)
-
-See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for detailed API usage.
-
-## Leave Policy
-
-- **EL (Earned Leave)**: 18 days/year
-- **CL (Casual Leave)**: 12 days/year
-- **SL (Sick Leave)**: 12 days/year
-
-## Architecture
-
-### LangGraph Router
-
-The main agent uses LangGraph's StateGraph to route requests:
-
-```
-User Input → Router → Intent Detection → Agent Selection → Response
-```
-
-**Agents:**
-- `leave_agent`: Rule-based leave workflow (no LLM)
-- `email_agent`: Email composition and sending
-- `query_agent`: Policy Q&A (ChromaDB) + Leave balance (MySQL)
-- `schedule_agent`: Google Calendar integration
-- `general_agent`: LLM-powered conversational responses
-
-### Memory Management
-
-Each agent has ConversationBufferWindowMemory:
-- **Window size**: 5-10 messages per agent
-- **Auto-summarization**: Old messages summarized before dropping
-- **State persistence**: Memory serialized in LangGraph State
-
-### Database Schema
-
-**employees table:**
-- id, name, email, department, role
-
-**leaves table:**
-- leave_id, employee_id, start_date, end_date, leave_type, days, status, reason, submitted_at
-
-## Development
-
-### Adding a New Agent
-
-1. Create `src/main_agent/agents/new_agent/executor.py`
-2. Implement agent function with State parameter
-3. Add to `src/main_agent/router.py`:
-   - Import agent
-   - Add node to graph
-   - Add routing logic
-   - Add edge to END
-
-### Running Tests
-
-```bash
-# Test all connections
 python tests/test_connections.py
-
-# Test specific agent (example)
-python -c "from src.main_agent.agents.leave.executor import leave_agent; print('Leave agent loaded')"
 ```
 
-## Troubleshooting
+### Test API Endpoints
+Use Swagger UI at `http://localhost:8000/docs`:
+1. Login via `POST /api/auth/login`
+2. Copy the token
+3. Click **Authorize** button (🔒)
+4. Paste token and click **Authorize**
+5. Test any endpoint
 
-### Import Errors
+---
 
-If you see `ModuleNotFoundError`, ensure you're running from project root:
+## 🏗 Architecture
 
-```bash
-cd /path/to/NovaHR
-python run_main_agent.py
+### Backend Flow
+```
+User Request
+    ↓
+FastAPI (api/main.py)
+    ↓
+JWT Verification (api/dependencies/auth.py)
+    ↓
+Router (api/routers/*)
+    ↓
+LangGraph Agent Pipeline (src/main_agent/router.py)
+    ↓
+Specialized Agents (leave/email/query/schedule/general)
+    ↓
+Tools (MySQL, ChromaDB, Gmail, Google Calendar)
+    ↓
+Response
 ```
 
-### ChromaDB Not Found
-
-Run the embedder:
-
-```bash
-python src/tools/embed_policy.py
+### Agent Routing
+```
+User Message → Router Agent
+    ├─→ Leave Agent (apply for leave)
+    ├─→ Email Agent (send emails)
+    ├─→ Query Agent (policy Q&A, balance check)
+    ├─→ Schedule Agent (calendar events)
+    └─→ General Agent (conversation)
 ```
 
-### MySQL Connection Failed
+---
 
-Check `.env` credentials and ensure MySQL is running:
+## 🔐 Security
 
-```bash
-mysql -u root -p
-```
+- **Passwords:** bcrypt hashed (cost factor 12)
+- **JWT Tokens:** HS256 algorithm, 8-hour expiry
+- **Role-based Access:** HR vs Employee permissions enforced at API level
+- **CORS:** Configured for localhost (update for production)
+- **Environment Variables:** Sensitive data in `.env` (not committed)
 
-### Google Calendar Auth
+---
 
-If `token.json` is invalid, delete it and re-authenticate:
+## 📊 Database Schema
 
-```bash
-rm token.json
-# Run schedule agent and follow OAuth flow
-```
+### `employees` Table
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INT (PK) | Employee ID |
+| `name` | VARCHAR(100) | Full name |
+| `email` | VARCHAR(100) | Login email (unique) |
+| `department` | VARCHAR(100) | Department |
+| `password` | VARCHAR(255) | bcrypt hashed password |
+| `auth_role` | VARCHAR(20) | `HR` or `EMPLOYEE` |
 
-## License
+### `leaves` Table
+| Column | Type | Description |
+|--------|------|-------------|
+| `leave_id` | INT (PK) | Leave request ID |
+| `employee_id` | INT (FK) | References `employees.id` |
+| `leave_type` | VARCHAR(10) | `EL`, `CL`, or `SL` |
+| `start_date` | DATE | Leave start date |
+| `end_date` | DATE | Leave end date |
+| `days` | INT | Number of days |
+| `status` | VARCHAR(20) | `pending`, `approved`, `rejected` |
+| `reason` | TEXT | Reason for leave |
+| `submitted_at` | TIMESTAMP | Submission timestamp |
 
-MIT
+### Leave Policy
+| Type | Full Name | Days/Year |
+|------|-----------|-----------|
+| `EL` | Earned Leave | 18 |
+| `CL` | Casual Leave | 12 |
+| `SL` | Sick Leave | 12 |
 
-## Contributors
+---
 
-- Debabrata Dey (debabratadey8080@gmail.com)
+## 🛠 Tech Stack
 
-## Session History
+### Backend
+- **Framework:** FastAPI
+- **LLM:** Groq (Llama models)
+- **Agent Framework:** LangGraph + LangChain
+- **Database:** MySQL
+- **Vector DB:** ChromaDB
+- **Embeddings:** HuggingFace Sentence Transformers
+- **Auth:** JWT (python-jose) + bcrypt
 
-See `AGENTS.md` for detailed session history and implementation notes.
+### Frontend
+- **Framework:** React 18
+- **Styling:** Custom CSS
+- **HTTP Client:** Fetch API
+- **State Management:** React Hooks
+
+### Integrations
+- **Email:** Gmail SMTP
+- **Calendar:** Google Calendar API
+- **Monitoring:** LangSmith (optional)
+
+---
+
+## 📝 Environment Variables Reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | ✓ | Groq API key for LLM |
+| `EMAIL_ADDRESS` | ✓ | Gmail address for sending emails |
+| `EMAIL_APP_PASSWORD` | ✓ | Gmail app password |
+| `DB_HOST` | ✓ | MySQL host (default: localhost) |
+| `DB_USER` | ✓ | MySQL username |
+| `DB_PASSWORD` | ✓ | MySQL password |
+| `DB_NAME` | ✓ | MySQL database name |
+| `SECRET_KEY` | ✓ | JWT secret key (use strong random string) |
+| `LANGCHAIN_API_KEY` | ✗ | LangSmith API key (optional) |
+| `LANGCHAIN_TRACING_V2` | ✗ | Enable LangSmith tracing |
+| `LANGCHAIN_PROJECT` | ✗ | LangSmith project name |
+
+---
+
+## 🐛 Troubleshooting
+
+### Backend won't start
+- Check if port 8000 is already in use
+- Verify `.env` file exists and has all required variables
+- Ensure MySQL is running and credentials are correct
+
+### Frontend can't connect to backend
+- Verify backend is running at `http://localhost:8000`
+- Check browser console for CORS errors
+- Clear localStorage and re-login: `localStorage.clear()`
+
+### Token expired errors
+- Tokens expire after 8 hours
+- Logout and login again to get a fresh token
+
+### Leave requests not loading
+- Ensure backend is running (`python start_api.py`)
+- Check browser console for errors
+- Verify you're logged in as HR role
+
+---
+
+## 📄 License
+
+MIT License - feel free to use for personal or commercial projects.
+
+---
+
+## 👥 Contributors
+
+Built with ❤️ by the NovaHR team.
+
+---
+
+## 🔗 Links
+
+- **API Documentation:** `http://localhost:8000/docs`
+- **Frontend:** `http://localhost:3000`
+- **Dashboard:** `http://localhost:3000/dashboard` (HR only)

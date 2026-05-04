@@ -1,47 +1,127 @@
 # NovaHR API Documentation
 
+> Complete reference for the NovaHR FastAPI backend — authentication, chat, and session management.
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Project Structure](#project-structure)
+4. [Authentication Flow](#authentication-flow)
+5. [API Endpoints](#api-endpoints)
+   - [Health Check](#health-check)
+   - [Login](#login)
+   - [Chat](#chat)
+   - [Session Management](#session-management)
+6. [JWT Token](#jwt-token)
+7. [Request & Response Models](#request--response-models)
+8. [Error Codes](#error-codes)
+9. [Frontend Integration Guide](#frontend-integration-guide)
+10. [Environment Variables](#environment-variables)
+11. [Running the Server](#running-the-server)
+12. [Database Schema](#database-schema)
+
+---
+
 ## Overview
 
-The NovaHR API provides a RESTful interface to the AI-powered HR assistant. It supports chat-based interactions with session management, allowing frontend applications to integrate seamlessly.
+NovaHR API is a FastAPI-based backend that exposes the NovaHR AI agent system over HTTP. It handles:
 
-**Base URL:** `http://localhost:8000`
+- **Authentication** — Email/password login with JWT token response
+- **Chat** — Stateful conversation with the AI agent pipeline
+- **Session Management** — Per-user session state stored in memory
+- **Role-based routing** — HR and Employee roles handled automatically via token
 
-**API Documentation:** `http://localhost:8000/docs` (Swagger UI)
+**Base URL:** `http://localhost:8000`  
+**Interactive Docs:** `http://localhost:8000/docs`  
+**ReDoc:** `http://localhost:8000/redoc`
 
-**Alternative Docs:** `http://localhost:8000/redoc` (ReDoc)
+---
 
-## Features
+## Architecture
 
-- ✅ **No Authentication** - Simple API for development
-- ✅ **Session Management** - In-memory session storage
-- ✅ **CORS Enabled** - Ready for frontend integration
-- ✅ **Auto-generated Docs** - Swagger UI and ReDoc
-- ✅ **Type Safety** - Pydantic models for validation
-
-## Quick Start
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
+```
+Frontend
+   │
+   ├── POST /api/auth/login  ──→  auth/auth.py (bcrypt verify + JWT create)
+   │        ↓
+   │   Receives JWT token
+   │
+   └── POST /api/chat  ──→  Authorization: Bearer <token>
+            │
+            ├── api/dependencies/auth.py  (verify JWT)
+            ├── api/routers/chat.py       (session management)
+            └── src/main_agent/           (LangGraph pipeline)
+                    ├── leave_agent
+                    ├── email_agent
+                    ├── query_agent
+                    ├── schedule_agent
+                    └── general_agent
 ```
 
-### 2. Start the Server
+---
 
-```bash
-uvicorn api.main:app --reload --port 8000
+## Project Structure
+
+```
+NovaHR/
+├── api/
+│   ├── __init__.py
+│   ├── main.py                  ← FastAPI app, CORS, router registration
+│   ├── models.py                ← Pydantic request/response models
+│   ├── dependencies/
+│   │   ├── __init__.py
+│   │   └── auth.py              ← JWT verification dependency
+│   └── routers/
+│       ├── __init__.py
+│       ├── auth.py              ← POST /api/auth/login
+│       └── chat.py              ← POST /api/chat + session endpoints
+│
+├── auth/
+│   ├── auth.py                  ← login(), create_token(), route_to_agent()
+│   └── setup_auth.py            ← DB setup script (run once)
+│
+└── src/
+    └── main_agent/              ← LangGraph agent pipeline
 ```
 
-### 3. Access Swagger UI
+---
 
-Open your browser: `http://localhost:8000/docs`
+## Authentication Flow
 
-## Endpoints
+```
+1. User sends email + password
+        ↓
+2. auth.py queries MySQL employees table
+        ↓
+3. bcrypt.checkpw() verifies password against stored hash
+        ↓
+4. On success: create_token() generates JWT with user info
+        ↓
+5. Token returned to frontend (valid for 8 hours)
+        ↓
+6. Frontend sends token in every request header:
+   Authorization: Bearer <token>
+        ↓
+7. get_current_user() dependency decodes token on each request
+        ↓
+8. user_id, name, role extracted and passed to agent
+```
+
+---
+
+## API Endpoints
+
+---
 
 ### Health Check
 
 #### `GET /`
-Root endpoint - returns API status.
+Returns API running status.
+
+**No authentication required.**
 
 **Response:**
 ```json
@@ -52,8 +132,12 @@ Root endpoint - returns API status.
 }
 ```
 
+---
+
 #### `GET /health`
-Health check endpoint - verifies API is healthy.
+Verifies API is healthy.
+
+**No authentication required.**
 
 **Response:**
 ```json
@@ -66,65 +150,134 @@ Health check endpoint - verifies API is healthy.
 
 ---
 
-### Chat Endpoints
+### Login
+
+#### `POST /api/auth/login`
+
+Authenticates a user and returns a JWT token.
+
+**No authentication required.**
+
+**Request Body:**
+```json
+{
+  "email": "debu@gmail.com",
+  "password": "721242"
+}
+```
+
+**Success Response `200`:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": 1,
+    "name": "Debu",
+    "email": "debu@gmail.com",
+    "department": "Engineering",
+    "auth_role": "HR"
+  }
+}
+```
+
+**Error Response `401`:**
+```json
+{
+  "detail": "Invalid password"
+}
+```
+```json
+{
+  "detail": "User not found"
+}
+```
+
+**Token Expiry:** 8 hours from login time.
+
+---
+
+### Chat
 
 #### `POST /api/chat`
-Process a chat message and return the agent's response.
+
+Sends a message to the NovaHR AI agent and returns the response.
+
+**Authentication required** — `Authorization: Bearer <token>`
+
+The agent automatically uses the user's identity (name, ID, role) from the token. No need to pass employee info in the request body.
 
 **Request Body:**
 ```json
 {
   "message": "I want to apply for leave",
-  "session_id": "user-session-123",
-  "role": "hr",
-  "employee_id": 0,
-  "employee_name": ""
+  "session_id": "user-123-session-1"
 }
 ```
 
-**Parameters:**
-- `message` (string, required) - The user's message
-- `session_id` (string, required) - Unique session identifier
-- `role` (string, optional) - User role: "hr" or "employee" (default: "hr")
-- `employee_id` (int, optional) - Employee ID (default: 0)
-- `employee_name` (string, optional) - Employee name (default: "")
+| Field | Type | Description |
+|-------|------|-------------|
+| `message` | string | The user's message to the agent |
+| `session_id` | string | Unique ID to maintain conversation state. Generate one per user session. |
 
-**Response:**
+**Success Response `200`:**
 ```json
 {
-  "response": "Hi! I'm here to help with your leave request. What's your name?",
-  "session_id": "user-session-123",
+  "response": "What type of leave do you need? (EL, CL, or SL)",
+  "session_id": "user-123-session-1",
   "intent": "leave_request",
-  "step": "identify_employee"
+  "step": "ask_leave_type"
 }
 ```
 
-**Status Codes:**
-- `200` - Success
-- `500` - Agent processing failed
+| Field | Description |
+|-------|-------------|
+| `response` | Agent's reply to display to the user |
+| `session_id` | Same session ID echoed back |
+| `intent` | Current detected intent (leave_request, email_request, query_request, etc.) |
+| `step` | Current step in the agent workflow |
+
+**Error Response `401`:**
+```json
+{
+  "detail": "Invalid or expired token"
+}
+```
+
+**Error Response `500`:**
+```json
+{
+  "detail": "Agent processing failed: <error details>"
+}
+```
+
+**How the agent routes based on role:**
+- `HR` role → Full agent (leave, email, query, schedule, general)
+- `EMPLOYEE` role → Employee portal (leave + query only)
 
 ---
 
+### Session Management
+
 #### `GET /api/chat/session/{session_id}`
-Get information about a specific session.
 
-**Parameters:**
-- `session_id` (string, required) - The session ID to query
+Get the current state of a session.
 
-**Response (Session Exists):**
+**Authentication required.**
+
+**Response (session exists):**
 ```json
 {
-  "session_id": "user-session-123",
+  "session_id": "user-123-session-1",
   "intent": "leave_request",
-  "step": "ask_leave_type",
+  "step": "ask_dates",
   "exists": true
 }
 ```
 
-**Response (Session Not Found):**
+**Response (session not found):**
 ```json
 {
-  "session_id": "user-session-123",
+  "session_id": "user-123-session-1",
   "intent": null,
   "step": null,
   "exists": false
@@ -134,334 +287,341 @@ Get information about a specific session.
 ---
 
 #### `DELETE /api/chat/session/{session_id}`
-Delete a session and clear its state.
 
-**Parameters:**
-- `session_id` (string, required) - The session ID to delete
+Clears a session and resets conversation state.
 
-**Response (Success):**
+**Authentication required.**
+
+**Response:**
 ```json
 {
   "message": "Session cleared successfully"
 }
 ```
 
-**Response (Not Found):**
-```json
-{
-  "message": "Session not found"
-}
-```
+Use this when the user logs out or starts a fresh conversation.
 
 ---
 
 #### `GET /api/chat/sessions`
-List all active sessions (for debugging/monitoring).
+
+Lists all active sessions (for debugging/monitoring).
+
+**Authentication required.**
 
 **Response:**
 ```json
 {
   "total_sessions": 3,
-  "session_ids": [
-    "user-session-123",
-    "user-session-456",
-    "user-session-789"
-  ]
+  "session_ids": ["user-1-session", "user-2-session", "user-3-session"]
 }
 ```
 
 ---
 
-## Usage Examples
+## JWT Token
 
-### Example 1: Simple Chat Flow
+### Token Structure
 
-```bash
-# 1. Start a conversation
-curl -X POST "http://localhost:8000/api/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "hello",
-    "session_id": "demo-session",
-    "role": "hr"
-  }'
-
-# Response:
-# {
-#   "response": "Hello! How can I help you today?",
-#   "session_id": "demo-session",
-#   "intent": "general",
-#   "step": "completed"
-# }
-
-# 2. Check session status
-curl "http://localhost:8000/api/chat/session/demo-session"
-
-# 3. Clear session
-curl -X DELETE "http://localhost:8000/api/chat/session/demo-session"
-```
-
-### Example 2: Leave Request Flow
-
-```bash
-# 1. Start leave request
-curl -X POST "http://localhost:8000/api/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "I want to apply for leave",
-    "session_id": "leave-session",
-    "role": "employee",
-    "employee_id": 1,
-    "employee_name": "John Doe"
-  }'
-
-# 2. Provide leave type
-curl -X POST "http://localhost:8000/api/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "casual leave",
-    "session_id": "leave-session",
-    "role": "employee"
-  }'
-
-# 3. Continue conversation...
-```
-
-### Example 3: Policy Query
-
-```bash
-curl -X POST "http://localhost:8000/api/chat" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "what is the leave policy?",
-    "session_id": "policy-session",
-    "role": "employee",
-    "employee_id": 1,
-    "employee_name": "Jane Smith"
-  }'
-```
-
----
-
-## Session Management
-
-### How Sessions Work
-
-1. **Session Creation**: When a new `session_id` is sent, a fresh state is created
-2. **State Persistence**: Each session maintains its own conversation state
-3. **Memory**: Agent memories are preserved within the session
-4. **Cleanup**: Sessions can be deleted manually via DELETE endpoint
-
-### Session State
-
-Each session stores:
-- User input history
-- Agent intent and step
-- Leave/email/schedule data
-- Agent memories (conversation history)
-- Employee information
-
-### Best Practices
-
-1. **Generate Unique Session IDs**: Use UUIDs or timestamp-based IDs
-2. **Clean Up Sessions**: Delete sessions when conversation ends
-3. **Monitor Active Sessions**: Use `/api/chat/sessions` to track usage
-4. **Handle Errors**: Wrap API calls in try-catch blocks
-
----
-
-## Data Models
-
-### ChatRequest
-
-```python
-{
-  "message": str,           # Required
-  "session_id": str,        # Required
-  "role": str,              # Optional, default: "hr"
-  "employee_id": int,       # Optional, default: 0
-  "employee_name": str      # Optional, default: ""
-}
-```
-
-### ChatResponse
-
-```python
-{
-  "response": str,          # Agent's response
-  "session_id": str,        # Session identifier
-  "intent": str | None,     # Detected intent
-  "step": str | None        # Current workflow step
-}
-```
-
-### SessionInfo
-
-```python
-{
-  "session_id": str,        # Session identifier
-  "intent": str | None,     # Current intent
-  "step": str | None,       # Current step
-  "exists": bool            # Whether session exists
-}
-```
-
-### HealthResponse
-
-```python
-{
-  "status": str,            # "ok" or "error"
-  "message": str,           # Status message
-  "version": str            # API version
-}
-```
-
----
-
-## Error Handling
-
-### Error Response Format
+The JWT token contains the following payload:
 
 ```json
 {
-  "detail": "Agent processing failed: <error message>"
+  "user_id": 1,
+  "name": "Debu",
+  "email": "debu@gmail.com",
+  "role": "HR",
+  "exp": 1746450000
 }
 ```
 
-### Common Errors
+| Field | Description |
+|-------|-------------|
+| `user_id` | Employee ID from MySQL |
+| `name` | Employee's full name |
+| `email` | Employee's email |
+| `role` | `HR` or `EMPLOYEE` |
+| `exp` | Expiry timestamp (8 hours from login) |
 
-| Status Code | Description |
-|-------------|-------------|
-| 400 | Bad Request - Invalid input data |
-| 422 | Validation Error - Pydantic validation failed |
-| 500 | Internal Server Error - Agent processing failed |
+### Algorithm
+- **Algorithm:** HS256
+- **Secret:** `SECRET_KEY` from `.env`
+- **Expiry:** 8 hours
+
+### Sending the Token
+
+Include the token in every protected request:
+
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
 
 ---
 
-## CORS Configuration
+## Request & Response Models
 
-The API is configured to allow all origins for development:
-
+### `LoginRequest`
 ```python
-allow_origins=["*"]
-allow_credentials=True
-allow_methods=["*"]
-allow_headers=["*"]
+{
+  "email": str,      # required
+  "password": str    # required
+}
 ```
 
-**Production Note:** Tighten CORS settings before deploying to production.
+### `ChatRequest`
+```python
+{
+  "message": str,     # required — user's message
+  "session_id": str   # required — unique session identifier
+}
+```
+
+### `ChatResponse`
+```python
+{
+  "response": str,          # agent's reply
+  "session_id": str,        # echoed session ID
+  "intent": str | null,     # detected intent
+  "step": str | null        # current workflow step
+}
+```
+
+### `SessionInfo`
+```python
+{
+  "session_id": str,
+  "intent": str | null,
+  "step": str | null,
+  "exists": bool
+}
+```
+
+### `HealthResponse`
+```python
+{
+  "status": str,       # "ok"
+  "message": str,
+  "version": str       # "1.0.0"
+}
+```
 
 ---
 
-## Development
+## Error Codes
 
-### Running in Development Mode
+| Code | Meaning | When |
+|------|---------|------|
+| `200` | Success | Request processed successfully |
+| `401` | Unauthorized | Wrong credentials, missing/invalid/expired token |
+| `500` | Server Error | Agent pipeline failed |
 
-```bash
-uvicorn api.main:app --reload --port 8000
+---
+
+## Frontend Integration Guide
+
+### Step 1 — Login and Store Token
+
+```javascript
+async function login(email, password) {
+  const response = await fetch("http://localhost:8000/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail); // "Invalid password" or "User not found"
+  }
+
+  const data = await response.json();
+  
+  // Store token (use localStorage or sessionStorage)
+  localStorage.setItem("token", data.token);
+  localStorage.setItem("user", JSON.stringify(data.user));
+  
+  return data;
+}
 ```
 
-### Running in Production Mode
+### Step 2 — Send Chat Messages
 
-```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+```javascript
+async function sendMessage(message, sessionId) {
+  const token = localStorage.getItem("token");
+
+  const response = await fetch("http://localhost:8000/api/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      message: message,
+      session_id: sessionId
+    })
+  });
+
+  if (response.status === 401) {
+    // Token expired — redirect to login
+    localStorage.removeItem("token");
+    window.location.href = "/login";
+    return;
+  }
+
+  const data = await response.json();
+  return data.response; // Display this to the user
+}
 ```
 
-### Environment Variables
+### Step 3 — Clear Session on Logout
 
-The API uses the same `.env` file as the main application:
+```javascript
+async function logout(sessionId) {
+  const token = localStorage.getItem("token");
+
+  // Clear session on server
+  await fetch(`http://localhost:8000/api/chat/session/${sessionId}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+
+  // Clear local storage
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  
+  window.location.href = "/login";
+}
+```
+
+### Step 4 — Generate a Session ID
+
+```javascript
+// Generate a unique session ID per user session
+function generateSessionId() {
+  return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Or use user ID + timestamp for consistency
+function getUserSessionId(userId) {
+  return `user-${userId}-${Date.now()}`;
+}
+```
+
+### Complete Example Flow
+
+```javascript
+// 1. Login
+const { token, user } = await login("rahul@gmail.com", "123");
+
+// 2. Generate session ID
+const sessionId = generateSessionId();
+
+// 3. Chat loop
+const reply1 = await sendMessage("I want to apply for leave", sessionId);
+// → "What type of leave do you need? (EL, CL, or SL)"
+
+const reply2 = await sendMessage("CL", sessionId);
+// → "Got it, CL. When do you want to take leave?"
+
+const reply3 = await sendMessage("2026-05-10 to 2026-05-12", sessionId);
+// → "I see, 3 days from 2026-05-10 to 2026-05-12. Any reason for this leave?"
+
+// 4. Logout
+await logout(sessionId);
+```
+
+---
+
+## Environment Variables
+
+Add these to your `.env` file:
 
 ```env
-GROQ_API_KEY=your_groq_api_key
+# JWT Authentication
+SECRET_KEY=novahr_super_secret_key_2026
+
+# MySQL Database
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_password
 DB_NAME=novahr
-EMAIL_ADDRESS=your_email@gmail.com
-EMAIL_APP_PASSWORD=your_app_password
+
+# Groq LLM
+GROQ_API_KEY=your_groq_api_key
+
+# LangSmith (optional)
 LANGCHAIN_API_KEY=your_langsmith_key
 LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=NovaHR
+LANGCHAIN_PROJECT=novahr
+```
+
+> **Important:** Change `SECRET_KEY` to a strong random string before deploying to production.
+
+---
+
+## Running the Server
+
+### Development (with auto-reload)
+```bash
+uvicorn api.main:app --reload --port 8000
+```
+
+### Production
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### Install Dependencies
+```bash
+pip install -r requirements.txt
 ```
 
 ---
 
-## Testing
+## Database Schema
 
-### Manual Testing with Swagger UI
+### `employees` table
 
-1. Open `http://localhost:8000/docs`
-2. Click on any endpoint
-3. Click "Try it out"
-4. Fill in the parameters
-5. Click "Execute"
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INT (PK) | Employee ID |
+| `name` | VARCHAR | Full name |
+| `email` | VARCHAR | Login email |
+| `department` | VARCHAR | Department name |
+| `password` | VARCHAR(255) | bcrypt hashed password |
+| `auth_role` | VARCHAR(20) | `HR` or `EMPLOYEE` |
 
-### Automated Testing
+### `leaves` table
 
-```python
-import requests
+| Column | Type | Description |
+|--------|------|-------------|
+| `leave_id` | INT (PK) | Leave request ID |
+| `employee_id` | INT (FK) | References employees.id |
+| `leave_type` | VARCHAR | `EL`, `CL`, or `SL` |
+| `start_date` | DATE | Leave start date |
+| `end_date` | DATE | Leave end date |
+| `days` | INT | Number of days |
+| `status` | VARCHAR(20) | `pending`, `approved`, `rejected` |
+| `reason` | TEXT | Reason for leave |
+| `submitted_at` | TIMESTAMP | Submission timestamp |
 
-# Test health endpoint
-response = requests.get("http://localhost:8000/health")
-assert response.status_code == 200
-assert response.json()["status"] == "ok"
+### Leave Policy
 
-# Test chat endpoint
-response = requests.post(
-    "http://localhost:8000/api/chat",
-    json={
-        "message": "hello",
-        "session_id": "test-123",
-        "role": "hr"
-    }
-)
-assert response.status_code == 200
-assert "response" in response.json()
-```
-
----
-
-## Architecture
-
-```
-Frontend (React/Vue/etc)
-    ↓
-FastAPI (api/main.py)
-    ↓
-Chat Router (api/routers/chat.py)
-    ↓
-Session Manager (in-memory dict)
-    ↓
-NovaHR Agent (src/main_agent)
-    ↓
-LangGraph Pipeline
-    ↓
-Individual Agents (leave, email, query, etc)
-```
+| Type | Full Name | Days/Year |
+|------|-----------|-----------|
+| `EL` | Earned Leave | 18 |
+| `CL` | Casual Leave | 12 |
+| `SL` | Sick Leave | 12 |
 
 ---
 
-## Future Enhancements
+## Default Credentials (Development)
 
-- [ ] Add authentication (JWT tokens)
-- [ ] Add rate limiting
-- [ ] Add request logging
-- [ ] Add persistent session storage (Redis/PostgreSQL)
-- [ ] Add WebSocket support for real-time chat
-- [ ] Add file upload support
-- [ ] Add admin endpoints
-- [ ] Add metrics and monitoring
+| Name | Email | Password | Role |
+|------|-------|----------|------|
+| Debu | debu@gmail.com | 721242 | HR |
+| Rahul | rahul@gmail.com | 123 | EMPLOYEE |
+| Priya | priya@gmail.com | 123 | EMPLOYEE |
 
----
-
-## Support
-
-For issues or questions:
-- Check Swagger UI: `http://localhost:8000/docs`
-- Review logs in terminal
-- Check session state: `GET /api/chat/session/{session_id}`
-
----
-
-**Version:** 1.0.0  
-**Last Updated:** May 4, 2026
+> These are development credentials. Change passwords before going to production.
