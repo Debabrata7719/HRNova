@@ -75,6 +75,13 @@ data/chroma_db/
 # NovaHR specific
 graphs/
 memory_summaries.json
-
-
 plan.md
+
+# API specific
+*.pid
+*.sock
+uvicorn.log
+fastapi.log
+
+# Temporary documentation (optional - remove if you want to keep these)
+API_SETUP_SUMMARY.md
