@@ -42,6 +42,7 @@ MANIFEST
 .coverage
 htmlcov/
 .tox/
+test_*.py
 
 # Virtual environments
 venv/
@@ -57,7 +58,6 @@ ENV.bak/
 *.swp
 *.swo
 *~
-.DS_Store
 
 # OS
 .DS_Store
@@ -75,7 +75,7 @@ data/chroma_db/
 # NovaHR specific
 graphs/
 memory_summaries.json
-plan.md
+AGENTS.md
 
 # API specific
 *.pid
@@ -83,5 +83,10 @@ plan.md
 uvicorn.log
 fastapi.log
 
-# Temporary documentation (optional - remove if you want to keep these)
-API_SETUP_SUMMARY.md
+# Frontend (React)
+novahr-frontend/node_modules/
+novahr-frontend/build/
+novahr-frontend/.env.local
+novahr-frontend/npm-debug.log*
+novahr-frontend/yarn-debug.log*
+novahr-frontend/yarn-error.log*

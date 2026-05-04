@@ -28,6 +28,7 @@ class DatabaseConnection:
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
                 database=os.getenv("DB_NAME"),
+                buffered=True  # Prevent "Unread result found" errors
             )
             if self.connection.is_connected():
                 pass  # Connection successful, no need to print
@@ -66,7 +67,7 @@ class DatabaseConnection:
                 return affected_rows
 
         except Error as e:
-            pass  # Silent error handling
+            print(f"DB Query Error: {e}")  # Show errors for debugging
             return None
 
     def insert_query(self, query, params=None):
@@ -93,8 +94,8 @@ class DatabaseConnection:
             return last_id
 
         except Error as e:
-            with open("/tmp/db_error.log", "a") as f:
-                f.write(f"DB Insert Error: {e}\n")
+            # Log error to console instead of file (cross-platform)
+            print(f"DB Insert Error: {e}")
             return None
 
     def close(self):

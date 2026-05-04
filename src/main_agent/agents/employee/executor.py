@@ -16,27 +16,38 @@ from src.main_agent.memory import (
 )
 
 
-def run_employee_agent():
-    """Main employee agent loop"""
+def run_employee_agent(employee_id=None, employee_name=None, employee_email=None):
+    """
+    Main employee agent loop
+    
+    Args:
+        employee_id: Pre-authenticated employee ID (optional)
+        employee_name: Pre-authenticated employee name (optional)
+        employee_email: Pre-authenticated employee email (optional)
+    """
     print("\n=== NovaHR Employee Portal (type 'exit' to quit) ===\n")
 
-    # Login
-    print("Please login with your name")
-    name = input("Enter your name: ").strip()
-    if not name:
-        print("Name is required.")
-        return
+    # If employee info is provided (from auth), use it directly
+    if employee_id and employee_name:
+        emp = {"id": employee_id, "name": employee_name}
+        print(f"Welcome, {employee_name}!")
+    else:
+        # Otherwise, ask for name (standalone mode)
+        print("Please login with your name")
+        name = input("Enter your name: ").strip()
+        if not name:
+            print("Name is required.")
+            return
 
-    # Find employee
-    emp = find_employee(name)
-    if not emp:
-        print(f"Employee '{name}' not found. Please contact HR.")
-        return
+        # Find employee
+        emp = find_employee(name)
+        if not emp:
+            print(f"Employee '{name}' not found. Please contact HR.")
+            return
 
-    employee_id = emp["id"]
-    employee_name = emp["name"]
-
-    print(f"\nWelcome, {employee_name}!")
+        employee_id = emp["id"]
+        employee_name = emp["name"]
+        print(f"\nWelcome, {employee_name}!")
     print("I can help you with:")
     print("  1. Apply for leave")
     print("  2. Ask questions (policy, leave balance, etc.)")

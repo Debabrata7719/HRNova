@@ -86,7 +86,7 @@ def check_balance(employee_id: int) -> dict:
         FROM leaves
         WHERE employee_id = %s 
         AND leave_type = %s 
-        AND status IN ('approved', 'pending_approval')
+        AND status IN ('approved', 'pending')
         """
         result = db.execute_query(query, (employee_id, leave_type))
         used_days = result[0]["total_used"] if result else 0
@@ -253,7 +253,7 @@ def leave_agent(state: dict) -> dict:
                 FROM leaves
                 WHERE employee_id = %s 
                 AND leave_type = %s 
-                AND status IN ('approved', 'pending_approval')
+                AND status IN ('approved', 'pending')
                 """
                 result = db.execute_query(query, (emp_id, leave_type))
                 used_days = result[0]["total_used"] if result else 0
@@ -275,7 +275,7 @@ def leave_agent(state: dict) -> dict:
                             leave_data["end_date"],
                             leave_type,
                             leave_data["days"],
-                            "pending_approval",
+                            "pending",
                             leave_data["reason"],
                             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         ),
@@ -456,7 +456,7 @@ def leave_agent_standalone(state: dict) -> dict:
                             end_date,
                             leave_type,
                             days,
-                            "pending_approval",
+                            "pending",
                             reason,
                             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         ),
