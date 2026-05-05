@@ -78,17 +78,27 @@ def login(email: str, password: str) -> dict:
     
     user_data = result[0]
     
-    # Check password (bcrypt verification)
-    # Convert password to bytes and verify against stored hash
-    password_bytes = password.encode('utf-8')
-    stored_hash_bytes = user_data["password"].encode('utf-8')
-    
-    if not bcrypt.checkpw(password_bytes, stored_hash_bytes):
+    # Check password using bcrypt
+    if not bcrypt.checkpw(password.encode('utf-8'), user_data["password"].encode('utf-8')):
         return {
             "success": False,
             "message": "Invalid password",
             "user": None
         }
+    
+    # Rehash with 10 rounds if stored hash uses more (transparent speed upgrade)
+    # bcrypt hash format: $2b$<rounds>$<salt+hash>
+    stored_hash = user_data["password"]
+    try:
+        current_rounds = int(stored_hash.split('$')[2])
+        if current_rounds > 10:
+            new_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=10))
+            db.execute_query(
+                "UPDATE employees SET password=%s WHERE id=%s",
+                (new_hash.decode('utf-8'), user_data["id"])
+            )
+    except Exception:
+        pass  # If parsing fails, skip rehash — login still succeeds
     
     # Login successful - return user data (without password) + token
     user = {
