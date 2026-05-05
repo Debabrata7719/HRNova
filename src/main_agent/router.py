@@ -37,6 +37,7 @@ class State(TypedDict):
     output: str
     employee_id: int
     employee_name: str
+    role: str  # "HR" or "EMPLOYEE" — controls access to schedule agent
 
     # Schedule agent fields
     schedule_title: str
@@ -51,6 +52,9 @@ class State(TypedDict):
     query_agent_memory: dict  # Serialized ConversationBufferWindowMemory
     schedule_agent_memory: dict  # Serialized ConversationBufferWindowMemory
 
+    # Long-term memory (ChromaDB)
+    long_term_memory: list  # Retrieved memories from ChromaDB
+    
     # For future long-term memory coordination
     session_summaries: dict  # Summaries of each agent's actions
 
@@ -65,19 +69,25 @@ def router(state: State) -> State:
     """
     user_input = state.get("input", "").lower()
     current_step = state.get("step", "initial")
+    role = state.get("role", "EMPLOYEE").upper()
 
     # Detect new intent when starting fresh or starting new request
     if current_step in ["initial", "completed"]:
         # Reset step when starting new request
         if current_step == "completed":
             state["step"] = "initial"
-        # Check for schedule intents first (highest priority)
+        # Schedule is HR-only — redirect employees to general with a message
         if (
             "schedule" in user_input
             or "meeting" in user_input
             or "calendar" in user_input
         ):
-            state["intent"] = "schedule_request"
+            if role == "HR":
+                state["intent"] = "schedule_request"
+            else:
+                state["intent"] = "general"
+                state["output"] = "Sorry, scheduling meetings is only available to HR. I can help you with leave requests or policy questions."
+                state["step"] = "completed"
         # Check for query intents
         elif "balance" in user_input or "policy" in user_input:
             state["intent"] = "query_request"
@@ -106,6 +116,11 @@ def route_decision(
 
     current_intent = state.get("intent", "")
     current_step = state.get("step", "initial")
+
+    # If router already handled the request (e.g. blocked schedule for employee),
+    # route to general_agent which will just pass through the existing output
+    if current_step == "completed" and state.get("output"):
+        return "general_agent"
 
     # Continue leave workflow if active
     if current_intent == "leave_request" and current_step not in [
