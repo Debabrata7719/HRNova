@@ -36,6 +36,17 @@ class DatabaseConnection:
             print(f"Connection error: {e}")
             self.connection = None
 
+    def ensure_connected(self):
+        """Reconnect if the connection has gone stale (e.g. MySQL timeout)."""
+        try:
+            if self.connection and self.connection.is_connected():
+                return  # Still alive
+        except Exception:
+            pass
+        # Connection lost — reconnect
+        print("[DB] Connection lost, reconnecting...")
+        self.connect()
+
     def execute_query(self, query, params=None):
         """
         Execute a query and return results
@@ -47,6 +58,7 @@ class DatabaseConnection:
         Returns:
             list: Query results
         """
+        self.ensure_connected()
         try:
             cursor = self.connection.cursor(dictionary=True)
             if params:
@@ -81,6 +93,7 @@ class DatabaseConnection:
         Returns:
             int: Last inserted row ID, or None on error
         """
+        self.ensure_connected()
         try:
             cursor = self.connection.cursor()
             if params:
