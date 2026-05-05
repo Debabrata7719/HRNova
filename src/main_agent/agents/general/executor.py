@@ -27,7 +27,9 @@ llm = ChatGroq(
 SYSTEM_PROMPT = """You are a friendly HR Assistant chatbot. You are helpful, professional, and conversational. 
 When users send general messages (not task-related), respond naturally and helpfully.
 Keep responses concise and friendly (1-2 sentences).
-If the user seems to want help with a task (leave requests, emails, etc.), suggest they can ask you directly for those tasks."""
+If the user seems to want help with a task (leave requests, emails, etc.), suggest they can ask you directly for those tasks.
+
+IMPORTANT: You have access to long-term memory about this user. Use it to personalize your responses and remember past conversations."""
 
 
 @traceable(name="General Agent")
@@ -45,6 +47,10 @@ def general_agent(state):
         state: Updated dictionary with 'output' key and updated 'general_agent_memory'
     """
     user_input = state.get("input", "").strip()
+
+    # If router already set a response (e.g. blocked feature for this role), pass through
+    if state.get("step") == "completed" and state.get("output"):
+        return state
 
     # Extract memory from state (window size: 7)
     memory_dict = state.get("general_agent_memory", {})
@@ -67,6 +73,14 @@ def general_agent(state):
 
         # Build message list for LLM from conversation history
         messages = [SystemMessage(content=SYSTEM_PROMPT)]
+        
+        # 🧠 Add long-term memory context if available
+        long_term_memory = state.get("long_term_memory", [])
+        if long_term_memory:
+            memory_context = "\n".join([f"- {mem}" for mem in long_term_memory])
+            messages.append(SystemMessage(
+                content=f"[PAST MEMORY ABOUT THIS USER]\n{memory_context}\n[END MEMORY]\n\nUse this information to personalize your response if relevant."
+            ))
 
         # Add all messages from memory to context
         for msg in memory.messages:
