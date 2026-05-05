@@ -8,9 +8,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from api.routers import chat, auth, leaves
+from api.routers import chat, auth, leaves, memory
 from api.models import HealthResponse
 from dotenv import load_dotenv
+from apscheduler.schedulers.background import BackgroundScheduler
+from src.utils.memory_store import get_memory_store
 
 load_dotenv()
 
@@ -23,7 +25,61 @@ app = FastAPI(
 )
 
 
+# ==================== AUTOMATIC MEMORY CLEANUP ====================
+def cleanup_old_memories_job():
+    """
+    Background job to clean up old memories.
+    Runs automatically every day at 2 AM.
+    """
+    try:
+        print("\n[MEMORY CLEANUP] Starting automatic cleanup...")
+        memory_store = get_memory_store()
+        
+        # Get stats before
+        stats_before = memory_store.get_stats()
+        
+        # Delete memories older than 30 days
+        memory_store.cleanup_old_memories(days=30)
+        
+        # Get stats after
+        stats_after = memory_store.get_stats()
+        deleted = stats_before['total_memories'] - stats_after['total_memories']
+        
+        print(f"[MEMORY CLEANUP] Completed! Deleted {deleted} old memories")
+        print(f"[MEMORY CLEANUP] Total memories: {stats_before['total_memories']} → {stats_after['total_memories']}")
+    except Exception as e:
+        print(f"[MEMORY CLEANUP] Failed: {str(e)}")
+
+
+# Initialize scheduler
+scheduler = BackgroundScheduler()
+
+# Schedule cleanup job to run daily at 2 AM
+scheduler.add_job(
+    cleanup_old_memories_job,
+    trigger='cron',
+    hour=2,
+    minute=0,
+    id='memory_cleanup',
+    name='Clean up old memories (30+ days)',
+    replace_existing=True
+)
+
+# Start scheduler
+scheduler.start()
+print("[SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)")
+
+
+@app.on_event("shutdown")
+def shutdown_scheduler():
+    """Shutdown scheduler when app stops"""
+    scheduler.shutdown()
+    print("[SCHEDULER] Scheduler stopped")
+# ==================== END AUTOMATIC CLEANUP ====================
+
+
 def custom_openapi():
+    """Custom OpenAPI schema with Bearer token authentication"""
     if app.openapi_schema:
         return app.openapi_schema
 
@@ -35,6 +91,9 @@ def custom_openapi():
     )
 
     # Add Bearer token security scheme
+    if "components" not in schema:
+        schema["components"] = {}
+    
     schema["components"]["securitySchemes"] = {
         "BearerAuth": {
             "type": "http",
@@ -46,7 +105,8 @@ def custom_openapi():
     # Apply security globally to all endpoints
     for path in schema.get("paths", {}).values():
         for operation in path.values():
-            operation["security"] = [{"BearerAuth": []}]
+            if isinstance(operation, dict):
+                operation["security"] = [{"BearerAuth": []}]
 
     app.openapi_schema = schema
     return schema
@@ -67,6 +127,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
 app.include_router(leaves.router, prefix="/api", tags=["Leaves"])
+app.include_router(memory.router, prefix="/api", tags=["Memory"])
 
 
 @app.get("/", response_model=HealthResponse)
