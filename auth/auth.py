@@ -6,20 +6,17 @@ Handles login and role-based routing
 import sys
 import os
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.tools.db_connection import get_db
+from src.config import get_settings
+from src.logger import get_logger
 import bcrypt
 from jose import jwt
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
-load_dotenv()
-
-SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret")
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 8
+logger = get_logger(__name__)
+_settings = get_settings()
 
 
 def create_token(user: dict) -> str:
@@ -29,9 +26,9 @@ def create_token(user: dict) -> str:
         "name": user["name"],
         "email": user["email"],
         "role": user["auth_role"],
-        "exp": datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS)
+        "exp": datetime.utcnow() + timedelta(hours=_settings.TOKEN_EXPIRE_HOURS),
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, _settings.SECRET_KEY, algorithm=_settings.JWT_ALGORITHM)
 
 
 def login(email: str, password: str) -> dict:

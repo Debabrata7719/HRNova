@@ -1,7 +1,10 @@
 """
-NovaHR - Add Employee Script
-=============================
-Run this script to add a new employee to the database.
+NovaHR - Employee Management Script
+====================================
+Run this script to:
+1. Add a new employee to the database
+2. Reset an employee's password
+
 Usage: python add_employee.py
 """
 
@@ -18,8 +21,17 @@ from src.tools.db_connection import get_db
 def print_header():
     print()
     print("=" * 50)
-    print("       NovaHR — Add New Employee")
+    print("       NovaHR — Employee Management")
     print("=" * 50)
+    print()
+
+
+def print_menu():
+    """Display main menu."""
+    print("\nWhat would you like to do?")
+    print("  1. Add new employee")
+    print("  2. Reset employee password")
+    print("  3. Exit")
     print()
 
 
@@ -74,6 +86,44 @@ def email_exists(db, email):
         "SELECT id FROM employees WHERE email = %s", (email,)
     )
     return result and len(result) > 0
+
+
+def find_employee(db, search_term):
+    """Find employee by email or name."""
+    # Try exact email match first
+    result = db.execute_query(
+        "SELECT id, name, email, department, auth_role FROM employees WHERE email = %s",
+        (search_term,)
+    )
+    if result:
+        return result[0]
+    
+    # Try name match (partial)
+    result = db.execute_query(
+        "SELECT id, name, email, department, auth_role FROM employees WHERE LOWER(name) LIKE %s",
+        (f"%{search_term.lower()}%",)
+    )
+    if result:
+        if len(result) == 1:
+            return result[0]
+        else:
+            # Multiple matches - show list
+            print(f"\n  Found {len(result)} employees matching '{search_term}':")
+            for i, emp in enumerate(result, 1):
+                print(f"    {i}. {emp['name']} ({emp['email']})")
+            
+            while True:
+                choice = input(f"\n  Select employee [1-{len(result)}]: ").strip()
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(result):
+                        return result[idx]
+                    else:
+                        print(f"  ✗ Please enter a number between 1 and {len(result)}")
+                except ValueError:
+                    print("  ✗ Please enter a valid number")
+    
+    return None
 
 
 def collect_employee_details():
@@ -147,26 +197,71 @@ def save_employee(db, details):
     )
 
 
-def add_another():
-    answer = input("\n  Add another employee? [y/N]: ").strip().lower()
-    return answer in ("y", "yes")
-
-
-def main():
-    print_header()
-
-    # Connect to DB first — fail early if something is wrong
+def reset_password_workflow(db):
+    """Reset password for an existing employee."""
+    print()
+    print("=" * 50)
+    print("       Reset Employee Password")
+    print("=" * 50)
+    print()
+    
+    # Search for employee
+    search = get_input("  Enter employee name or email")
+    
+    employee = find_employee(db, search)
+    
+    if not employee:
+        print(f"\n  ✗ No employee found matching '{search}'")
+        return
+    
+    # Show employee details
+    print()
+    print("─" * 50)
+    print("  Employee found:")
+    print(f"    Name       : {employee['name']}")
+    print(f"    Email      : {employee['email']}")
+    print(f"    Department : {employee['department']}")
+    print(f"    Role       : {employee['auth_role']}")
+    print("─" * 50)
+    print()
+    
+    # Confirm
+    answer = input("  Reset password for this employee? [Y/n]: ").strip().lower()
+    if answer not in ("", "y", "yes"):
+        print("  Cancelled.")
+        return
+    
+    # Get new password
+    print("\n── New Password")
+    new_password = get_password()
+    
+    # Hash and update
     try:
-        db = get_db()
-        if not db.connection or not db.connection.is_connected():
-            print("✗ Could not connect to the database.")
-            print("  Check your .env file (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME).")
-            sys.exit(1)
-        print("✔ Connected to database\n")
+        hashed = bcrypt.hashpw(
+            new_password.encode("utf-8"),
+            bcrypt.gensalt(rounds=10)
+        ).decode("utf-8")
+        
+        db.execute_query(
+            "UPDATE employees SET password = %s WHERE id = %s",
+            (hashed, employee['id'])
+        )
+        
+        print(f"\n  ✔ Password reset successfully for '{employee['name']}'!")
+        print(f"    They can now log in with: {employee['email']}")
+        print(f"    New password: {'*' * len(new_password)}")
     except Exception as e:
-        print(f"✗ Database connection failed: {e}")
-        sys.exit(1)
+        print(f"\n  ✗ Failed to reset password: {e}")
 
+
+def add_employee_workflow(db):
+    """Add a new employee."""
+    print()
+    print("=" * 50)
+    print("       Add New Employee")
+    print("=" * 50)
+    print()
+    
     while True:
         try:
             details = collect_employee_details()
@@ -192,8 +287,40 @@ def main():
         except Exception as e:
             print(f"\n  ✗ Failed to save: {e}")
 
-        if not add_another():
+        # Ask if want to add another
+        answer = input("\n  Add another employee? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
             break
+
+
+def main():
+    print_header()
+
+    # Connect to DB first — fail early if something is wrong
+    try:
+        db = get_db()
+        if not db.connection or not db.connection.is_connected():
+            print("✗ Could not connect to the database.")
+            print("  Check your .env file (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME).")
+            sys.exit(1)
+        print("✔ Connected to database")
+    except Exception as e:
+        print(f"✗ Database connection failed: {e}")
+        sys.exit(1)
+
+    while True:
+        print_menu()
+        choice = input("  Enter your choice [1-3]: ").strip()
+        
+        if choice == "1":
+            add_employee_workflow(db)
+        elif choice == "2":
+            reset_password_workflow(db)
+        elif choice == "3":
+            print("\n  Goodbye!")
+            break
+        else:
+            print("\n  ✗ Invalid choice. Please enter 1, 2, or 3.")
 
     print()
     print("=" * 50)
