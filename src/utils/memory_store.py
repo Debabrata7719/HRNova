@@ -184,29 +184,78 @@ class MemoryStore:
     
     def get_all_memories(self, user_id: str, limit: int = 10):
         """
-        Get all memories for a user (most recent first).
-        
+        Get all memories for a user with metadata (most recent first).
+
         Args:
             user_id: User's ID
             limit: Maximum number of memories to return
-            
+
         Returns:
-            List of memory texts
+            List of dicts with text, timestamp, intent
         """
         try:
             results = self.collection.get(
                 where={"user_id": str(user_id)},
-                limit=limit
+                limit=limit,
+                include=["documents", "metadatas"]
             )
-            
+
             if results and results["documents"]:
-                return results["documents"]
-            
+                memories = []
+                for doc, meta in zip(results["documents"], results.get("metadatas", [])):
+                    memories.append({
+                        "text": doc,
+                        "timestamp": meta.get("timestamp", ""),
+                        "intent": meta.get("intent", ""),
+                        "type": meta.get("type", ""),
+                    })
+                # Sort by timestamp descending
+                memories.sort(key=lambda x: x["timestamp"], reverse=True)
+                return memories
+
             return []
-            
+
         except Exception as e:
             print(f"[MEMORY] Get all failed: {str(e)}")
             return []
+
+    def get_all_users_memories(self, limit: int = 200):
+        """
+        Get memories for ALL users — HR admin view.
+
+        Returns:
+            Dict keyed by user_id, each value is a list of memory dicts
+        """
+        try:
+            results = self.collection.get(
+                limit=limit,
+                include=["documents", "metadatas"]
+            )
+
+            if not results or not results["documents"]:
+                return {}
+
+            grouped = {}
+            for doc, meta in zip(results["documents"], results.get("metadatas", [])):
+                uid = meta.get("user_id", "unknown")
+                if uid not in grouped:
+                    grouped[uid] = []
+                grouped[uid].append({
+                    "text": doc,
+                    "timestamp": meta.get("timestamp", ""),
+                    "intent": meta.get("intent", ""),
+                    "type": meta.get("type", ""),
+                })
+
+            # Sort each user's memories by timestamp descending
+            for uid in grouped:
+                grouped[uid].sort(key=lambda x: x["timestamp"], reverse=True)
+
+            return grouped
+
+        except Exception as e:
+            print(f"[MEMORY] Get all users failed: {str(e)}")
+            return {}
     
     def clear_user_memories(self, user_id: str):
         """
@@ -230,46 +279,55 @@ class MemoryStore:
     
     def cleanup_old_memories(self, days: int = 30):
         """
-        Delete memories older than specified days (TTL cleanup).
-        Should be run periodically (e.g., daily cron job).
-        
+        Delete memories older than specified days.
+
+        days=0  → delete ALL memories regardless of age
+        days=1  → delete memories not from today (before midnight today)
+        days=N  → delete memories older than N days from now
+
         Args:
-            days: Delete memories older than this many days (default: 30)
+            days: Threshold in days (0 = delete all)
         """
         from datetime import datetime, timedelta
-        
+
         try:
-            # Get all memories
-            all_results = self.collection.get(
-                include=["metadatas"]
-            )
-            
+            all_results = self.collection.get(include=["metadatas"])
+
             if not all_results or not all_results["ids"]:
                 print("[MEMORY CLEANUP] No memories to check")
                 return
-            
-            cutoff_date = datetime.now() - timedelta(days=days)
-            ids_to_delete = []
-            
-            # Check each memory's timestamp
-            for memory_id, metadata in zip(all_results["ids"], all_results["metadatas"]):
-                timestamp_str = metadata.get("timestamp", "")
-                if timestamp_str:
+
+            now = datetime.now()
+
+            if days == 0:
+                # Delete everything
+                ids_to_delete = all_results["ids"]
+            else:
+                # Cutoff = start of the day that is `days` days ago
+                # e.g. days=1 → start of yesterday → deletes anything before today
+                cutoff_date = (now - timedelta(days=days)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+                ids_to_delete = []
+
+                for memory_id, metadata in zip(all_results["ids"], all_results["metadatas"]):
+                    timestamp_str = metadata.get("timestamp", "")
+                    if not timestamp_str:
+                        continue
                     try:
-                        timestamp = datetime.fromisoformat(timestamp_str)
-                        if timestamp < cutoff_date:
+                        ts = datetime.fromisoformat(timestamp_str)
+                        if ts <= cutoff_date:
                             ids_to_delete.append(memory_id)
                     except Exception:
-                        # If timestamp parsing fails, keep the memory
                         pass
-            
-            # Delete old memories
+
             if ids_to_delete:
                 self.collection.delete(ids=ids_to_delete)
-                print(f"[MEMORY CLEANUP] Deleted {len(ids_to_delete)} memories older than {days} days")
+                print(f"[MEMORY CLEANUP] Deleted {len(ids_to_delete)} memories "
+                      f"({'all' if days == 0 else f'older than {days} days'})")
             else:
                 print(f"[MEMORY CLEANUP] No memories older than {days} days found")
-        
+
         except Exception as e:
             print(f"[MEMORY CLEANUP] Failed: {str(e)}")
     

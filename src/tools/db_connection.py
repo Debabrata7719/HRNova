@@ -1,130 +1,176 @@
 """
 MySQL Database Connection Utility for NovaHR
-Simple connection management for leave management system
+Uses tenacity for retry logic and proper logging.
 """
 
 import mysql.connector
 from mysql.connector import Error
-from dotenv import load_dotenv
-import os
+import time
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_fixed,
+    retry_if_exception,
+    before_sleep_log,
+)
+from src.config import get_settings
+from src.logger import get_logger
 
-# Load environment variables
-load_dotenv()
+logger = get_logger(__name__)
+
+# MySQL errno codes that mean the connection was dropped by the server
+_CONNECTION_ERRORS = {2006, 2013, 2055}
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """Return True only for transient MySQL connection errors worth retrying."""
+    if isinstance(exc, Error):
+        return getattr(exc, "errno", None) in _CONNECTION_ERRORS
+    return False
 
 
 class DatabaseConnection:
-    """Handle MySQL database connections and queries"""
+    """
+    MySQL connection wrapper with automatic reconnection and query retry.
+
+    - ping(reconnect=True) verifies the socket is alive before every query
+    - tenacity retries on connection-drop errors (errno 2006/2013/2055)
+    - Proper logging replaces print() statements
+    """
 
     def __init__(self):
-        """Initialize database connection with credentials from .env"""
         self.connection = None
-        self.connect()
+        self._connect()
 
-    def connect(self):
-        """Establish MySQL connection"""
+    # ── Connection management ─────────────────────────────────────────
+
+    def _connect(self):
+        """Open a fresh MySQL connection."""
+        cfg = get_settings()
         try:
             self.connection = mysql.connector.connect(
-                host=os.getenv("DB_HOST"),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                database=os.getenv("DB_NAME"),
-                buffered=True  # Prevent "Unread result found" errors
+                host=cfg.DB_HOST,
+                user=cfg.DB_USER,
+                password=cfg.DB_PASSWORD,
+                database=cfg.DB_NAME,
+                buffered=True,
+                autocommit=False,
+                connection_timeout=10,
             )
-            if self.connection.is_connected():
-                pass  # Connection successful, no need to print
+            logger.info("Connected to MySQL database '%s'", cfg.DB_NAME)
         except Error as e:
-            print(f"Connection error: {e}")
+            logger.error("MySQL connection failed: %s", e)
             self.connection = None
 
-    def ensure_connected(self):
-        """Reconnect if the connection has gone stale (e.g. MySQL timeout)."""
+    def _ensure_connected(self):
+        """Guarantee the connection is alive using ping."""
         try:
-            if self.connection and self.connection.is_connected():
-                return  # Still alive
+            if self.connection:
+                self.connection.ping(reconnect=True, attempts=3, delay=1)
+                return
         except Exception:
             pass
-        # Connection lost — reconnect
-        print("[DB] Connection lost, reconnecting...")
-        self.connect()
+        logger.warning("MySQL connection lost — reconnecting...")
+        self._connect()
 
-    def execute_query(self, query, params=None):
+    # ── Query execution ───────────────────────────────────────────────
+
+    def execute_query(self, query: str, params=None):
         """
-        Execute a query and return results
-
-        Args:
-            query (str): SQL query to execute
-            params (tuple): Parameters for parameterized query
+        Execute a SQL query with tenacity retry on connection errors.
 
         Returns:
-            list: Query results
+            list  — SELECT results (list of dicts)
+            int   — rows affected for INSERT/UPDATE/DELETE
+            None  — on unrecoverable error
         """
-        self.ensure_connected()
-        try:
-            cursor = self.connection.cursor(dictionary=True)
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_fixed(0.5),
+            retry=retry_if_exception(_is_connection_error),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=False,
+        )
+        def _run():
+            self._ensure_connected()
+            if not self.connection:
+                raise RuntimeError("No database connection available")
 
-            # For SELECT queries, fetch results
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute(query, params) if params else cursor.execute(query)
+
             if query.strip().upper().startswith("SELECT"):
                 result = cursor.fetchall()
                 cursor.close()
                 return result
             else:
-                # For INSERT/UPDATE/DELETE, commit and return rows affected
                 self.connection.commit()
-                affected_rows = cursor.rowcount
+                affected = cursor.rowcount
                 cursor.close()
-                return affected_rows
+                return affected
 
-        except Error as e:
-            print(f"DB Query Error: {e}")  # Show errors for debugging
+        try:
+            return _run()
+        except Exception as e:
+            logger.error("Query failed: %s | Query: %.120s", e, query)
             return None
 
-    def insert_query(self, query, params=None):
+    def insert_query(self, query: str, params=None):
         """
-        Execute insert query and return last inserted ID
-
-        Args:
-            query (str): INSERT SQL query
-            params (tuple): Parameters for query
+        Execute an INSERT and return the last inserted row ID.
 
         Returns:
-            int: Last inserted row ID, or None on error
+            int  — last inserted row ID
+            None — on error
         """
-        self.ensure_connected()
-        try:
-            cursor = self.connection.cursor()
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_fixed(0.5),
+            retry=retry_if_exception(_is_connection_error),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=False,
+        )
+        def _run():
+            self._ensure_connected()
+            if not self.connection:
+                raise RuntimeError("No database connection available")
 
+            cursor = self.connection.cursor()
+            cursor.execute(query, params) if params else cursor.execute(query)
             self.connection.commit()
             last_id = cursor.lastrowid
             cursor.close()
             return last_id
 
-        except Error as e:
-            # Log error to console instead of file (cross-platform)
-            print(f"DB Insert Error: {e}")
+        try:
+            return _run()
+        except Exception as e:
+            logger.error("Insert failed: %s | Query: %.120s", e, query)
             return None
 
     def close(self):
-        """Close database connection"""
-        if self.connection and self.connection.is_connected():
-            self.connection.close()
-            pass  # Connection closed
+        """Close the database connection."""
+        try:
+            if self.connection and self.connection.is_connected():
+                self.connection.close()
+                logger.info("MySQL connection closed")
+        except Exception:
+            pass
 
 
-# Global connection instance - lazy initialization
-db = None
+# ── Global singleton ──────────────────────────────────────────────────────────
+
+import logging  # noqa: E402  (needed for before_sleep_log)
+
+_db: DatabaseConnection | None = None
 
 
-def get_db():
-    """Get the global database connection instance (lazy initialization)"""
-    global db
-    if db is None:
-        db = DatabaseConnection()
-    return db
+def get_db() -> DatabaseConnection:
+    """
+    Return the global DatabaseConnection instance.
+    Recreates it if the connection is gone.
+    """
+    global _db
+    if _db is None or _db.connection is None:
+        _db = DatabaseConnection()
+    return _db

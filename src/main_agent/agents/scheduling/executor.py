@@ -8,6 +8,7 @@ import argparse
 import os
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -15,17 +16,19 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 import dateutil.parser
 from langsmith import traceable
+from src.config import get_settings
+from src.logger import get_logger
 
-from dotenv import load_dotenv
-
-load_dotenv()
+logger = get_logger(__name__)
+_settings = get_settings()
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+IST = ZoneInfo("Asia/Kolkata")
 
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0.2,
-    api_key=os.getenv("GROQ_API_KEY"),
+    api_key=_settings.GROQ_API_KEY,
 )
 
 # Get base directory (project root)
@@ -58,24 +61,29 @@ def load_credentials():
                     )
                 )
         else:
-            print("No valid credentials. Please authenticate via OAuth flow.")
+            logger.warning("No valid Google Calendar credentials found")
             return None
     return creds
 
 
 def parse_datetime_with_llm(user_input: str) -> dict:
     """Use LLM to parse natural language date/time"""
+    today_ist = datetime.now(IST)
+    today_str = today_ist.strftime("%B %d, %Y")
+    tomorrow_str = (today_ist + timedelta(days=1)).strftime("%Y-%m-%d")
+
     prompt = f"""Parse this meeting request and extract date and time.
 
-CURRENT DATE: May 04, 2026
-IMPORTANT: The current year is 2026. Always interpret dates as 2026 unless explicitly stated otherwise.
+CURRENT DATE: {today_str}
+TOMORROW'S DATE: {tomorrow_str}
+IMPORTANT: Always use the current year. Never guess a past date.
 
 Input: {user_input}
 
 Respond in this exact JSON format (no other text):
 {{
-    "title": "Meeting" (or simple title like "Team Meeting", "Call", "Sync" - never use the full input),
-    "date": "today", "tomorrow", "2026-05-06" format,
+    "title": "Meeting",
+    "date": "today", "tomorrow", or "YYYY-MM-DD" format,
     "time": "HH:MM in 24-hour format",
     "description": "extracted description or empty"
 }}
@@ -83,22 +91,20 @@ Respond in this exact JSON format (no other text):
 Rules for title:
 - Use simple title like "Meeting", "Team Meeting", "Call", "Sync", "Standup"
 - NEVER use the full user input as title
-- "schedule meeting" → title: "Meeting"
-- "team sync" → title: "Team Sync"
 
 Rules for date:
-- "May 06" or "06 May" = 2026-05-06
-- "tomorrow" = tomorrow's date
-- "today" = today's date
+- "tomorrow" → use exactly "tomorrow"
+- "today" → use exactly "today"
+- Specific date like "May 06" → use "YYYY-MM-DD" format
 
 Rules for time:
-- "4pm" = 16:00
+- "3pm" = 15:00
 - "4pm IST" = 16:00
+- Always output 24-hour format
 
 Examples:
-- "schedule meeting for May 06 at 4pm" → {{"title": "Meeting", "date": "2026-05-06", "time": "16:00", "description": ""}}
 - "meeting tomorrow at 3pm" → {{"title": "Meeting", "date": "tomorrow", "time": "15:00", "description": ""}}
-- "team standup on Friday at 10am" → {{"title": "Team Standup", "date": "2026-05-08", "time": "10:00", "description": ""}}
+- "team standup today at 10am" → {{"title": "Team Standup", "date": "today", "time": "10:00", "description": ""}}
 """
 
     messages = [
@@ -124,22 +130,23 @@ Examples:
 
         return data
     except Exception as e:
-        print(f"LLM parsing error: {e}")
+        logger.error("LLM datetime parsing error: %s", e)
         return {"title": "", "date": "", "time": "", "description": ""}
 
 
 def parse_to_datetime(date_str: str, time_str: str) -> datetime:
-    """Convert date/time strings to datetime object"""
-    today = datetime.now()
+    """
+    Convert date/time strings to a timezone-aware datetime in IST (Asia/Kolkata).
+    Returns a datetime with tzinfo=IST so isoformat() includes +05:30.
+    """
+    today = datetime.now(IST)
 
     date_str = date_str.lower().strip()
     time_str = time_str.lower().strip() if time_str else "09:00"
 
     if date_str in ["today"]:
         parsed_date = today.date()
-    elif date_str in ["tomorrow"]:
-        parsed_date = (today + timedelta(days=1)).date()
-    elif date_str in ["next day"]:
+    elif date_str in ["tomorrow", "next day"]:
         parsed_date = (today + timedelta(days=1)).date()
     elif "next" in date_str and "day" in date_str:
         days_ahead = 7 - today.weekday()
@@ -149,15 +156,17 @@ def parse_to_datetime(date_str: str, time_str: str) -> datetime:
     else:
         try:
             parsed_date = dateutil.parser.parse(date_str).date()
-        except:
+        except Exception:
             parsed_date = today.date()
 
     try:
         parsed_time = dateutil.parser.parse(time_str).time()
-    except:
+    except Exception:
         parsed_time = datetime.strptime("09:00", "%H:%M").time()
 
-    return datetime.combine(parsed_date, parsed_time)
+    # Combine and attach IST timezone — this makes isoformat() emit +05:30
+    naive_dt = datetime.combine(parsed_date, parsed_time)
+    return naive_dt.replace(tzinfo=IST)
 
 
 def create_calendar_event(

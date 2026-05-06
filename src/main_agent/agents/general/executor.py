@@ -5,8 +5,9 @@ Now includes conversation history with ConversationBufferWindowMemory (window: 7
 """
 
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage
-from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from src.config import get_settings
+from src.logger import get_logger
 from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
@@ -14,22 +15,42 @@ from src.main_agent.memory import (
     add_assistant_message_to_memory,
 )
 from langsmith import traceable
-import os
 
-# Load environment variables
-load_dotenv()
+logger = get_logger(__name__)
+_settings = get_settings()
 
-# Initialize Groq LLM
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile", temperature=0.7, api_key=os.getenv("GROQ_API_KEY")
+    model="llama-3.3-70b-versatile",
+    temperature=0.7,
+    api_key=_settings.GROQ_API_KEY,
 )
 
-SYSTEM_PROMPT = """You are a friendly HR Assistant chatbot. You are helpful, professional, and conversational. 
-When users send general messages (not task-related), respond naturally and helpfully.
-Keep responses concise and friendly (1-2 sentences).
-If the user seems to want help with a task (leave requests, emails, etc.), suggest they can ask you directly for those tasks.
+SYSTEM_PROMPT = """You are NovaHR, an AI-powered HR Assistant chatbot built to help employees with HR tasks.
 
-IMPORTANT: You have access to long-term memory about this user. Use it to personalize your responses and remember past conversations."""
+Your name is NovaHR. Always introduce yourself as NovaHR when asked.
+
+You are helpful, professional, and conversational. Keep responses concise and friendly (1-2 sentences).
+
+You can ANSWER QUESTIONS about:
+- Leave requests, leave balance, leave status
+- Company policy questions
+- General HR questions
+- Past conversations (using your memory)
+
+You can GUIDE users to perform actions by telling them what to say, but you CANNOT perform these actions yourself:
+- Scheduling meetings → tell the user to say "schedule a meeting at [time]"
+- Sending emails → tell the user to say "send an email to [person]"
+- Applying for leave → tell the user to say "I want to apply for leave"
+
+CRITICAL RULES — NEVER BREAK THESE:
+1. NEVER say "I've scheduled", "I've sent", "I've booked", "I've created" — you cannot perform these actions
+2. NEVER pretend to schedule a meeting, send an email, or submit a leave request
+3. If a user asks you to do something like "do same for tomorrow 4pm", tell them to use the proper command
+4. If asked about past actions from memory, you can CONFIRM what was done, but do NOT re-do it yourself
+5. If the user asks your name, say: "I'm NovaHR, your AI HR assistant!"
+6. If the user asks you to remember something, confirm you've noted it
+
+IMPORTANT: You have access to long-term memory about this user from past sessions. Use it to personalize your responses."""
 
 
 @traceable(name="General Agent")
@@ -87,7 +108,7 @@ def general_agent(state):
             if msg["role"] == "user":
                 messages.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
-                messages.append(HumanMessage(content=f"Assistant: {msg['content']}"))
+                messages.append(AIMessage(content=msg["content"]))
 
         # Generate response using LLM
         response = llm.invoke(messages)
@@ -103,8 +124,7 @@ def general_agent(state):
         state["general_agent_memory"] = serialize_memory_for_state(memory)
 
     except Exception as e:
-        # Fallback response if LLM fails
-        print(f"[LLM Error] {type(e).__name__}: {str(e)[:100]}")
+        logger.error("General agent LLM error: %s: %s", type(e).__name__, str(e)[:100])
         state["output"] = (
             "I'm here to help with: leave requests, sending emails, or general HR questions."
         )

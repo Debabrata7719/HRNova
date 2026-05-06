@@ -32,40 +32,39 @@ def is_important_llm(text: str, intent: str = None, step: str = None) -> bool:
     """
     Use LLM to determine if a message is important enough to store.
     More accurate than keyword matching.
-    
-    Args:
-        text: The message text
-        intent: The detected intent (optional)
-        step: The current step in workflow (optional)
-        
-    Returns:
-        True if message should be stored, False otherwise
     """
     if not LLM_AVAILABLE:
         return is_important_keyword(text, intent, step)
     
     if not text or len(text.strip()) < 5:
         return False
+
+    # Fast-path: always store explicit "remember" instructions
+    text_lower = text.lower().strip()
+    if any(kw in text_lower for kw in ["remember", "don't forget", "note that", "keep in mind"]):
+        return True
     
     # Build prompt for LLM
-    prompt = f"""You are a memory filter for an HR assistant chatbot.
+    prompt = f"""You are a memory filter for an HR assistant chatbot called NovaHR.
 
-Decide if this message contains important information that should be remembered long-term.
+Decide if this message contains information worth remembering long-term.
 
 STORE if message contains:
 - Personal information (name, department, role, preferences)
-- Important facts or details
-- Completed actions (leave submitted, email sent)
+- Important facts or details about the user
+- Completed actions (leave submitted, email sent, meeting scheduled)
 - User preferences or habits
 - Work-related information
+- Instructions to remember something
+- Anything the user explicitly wants saved
 
 DO NOT STORE if message is:
-- Trivial response (ok, yes, thanks, bye)
-- Generic question without context
-- Very short or meaningless
+- A trivial one-word response (ok, yes, no, thanks, bye, hi)
+- A generic greeting with no content
+- A very short filler phrase
 
 Message: "{text}"
-Intent: {intent or "unknown"}
+Intent: {intent or "general"}
 Step: {step or "unknown"}
 
 Answer with ONLY "yes" or "no":"""
@@ -79,14 +78,11 @@ Answer with ONLY "yes" or "no":"""
         response = filter_llm.invoke(messages)
         answer = response.content.strip().lower()
         
-        # Parse response
         if "yes" in answer:
             return True
         elif "no" in answer:
             return False
         else:
-            # If unclear, fallback to keyword method
-            print(f"[MEMORY FILTER] Unclear LLM response: {answer}, using keyword fallback")
             return is_important_keyword(text, intent, step)
             
     except Exception as e:

@@ -63,42 +63,98 @@ class State(TypedDict):
 @traceable(name="Router")
 def router(state: State) -> State:
     """
-    Detects intent ONLY (no agent calls)
-    Preserves existing intent if we're in the middle of a workflow
-    Resets intent when user starts a new request (step is initial or completed)
+    Detects intent ONLY (no agent calls).
+    Uses action-phrase matching — a keyword alone is NOT enough,
+    the user must express clear intent to perform that action.
+
+    Priority:
+    1. Schedule Agent — explicit create/book/set up a meeting (HR only)
+    2. Email Agent    — explicit send/compose/write an email
+    3. Leave Agent    — explicit apply/request/take leave
+    4. Query Agent    — questions about leave balance, status, policy
+    5. General Agent  — everything else (conversation, questions about past events, etc.)
     """
-    user_input = state.get("input", "").lower()
+    user_input = state.get("input", "").lower().strip()
     current_step = state.get("step", "initial")
     role = state.get("role", "EMPLOYEE").upper()
 
-    # Detect new intent when starting fresh or starting new request
     if current_step in ["initial", "completed"]:
-        # Reset step when starting new request
         if current_step == "completed":
             state["step"] = "initial"
-        # Schedule is HR-only — redirect employees to general with a message
-        if (
-            "schedule" in user_input
-            or "meeting" in user_input
-            or "calendar" in user_input
-        ):
+
+        # ── PRIORITY 1: Schedule Agent ────────────────────────────────
+        # Must be an ACTION phrase — not just a question containing "meeting"
+        schedule_action_phrases = [
+            "schedule a meeting", "schedule meeting",
+            "book a meeting", "book meeting",
+            "set up a meeting", "set up meeting",
+            "create a meeting", "create meeting",
+            "add to calendar", "add a calendar",
+            "create an event", "add an event",
+            "plan a meeting", "arrange a meeting",
+            # follow-up phrases like "do same for tomorrow 4pm"
+            "do same for", "same meeting for", "same for tomorrow",
+            "same for today", "repeat meeting", "reschedule",
+            "another meeting", "one more meeting",
+        ]
+        is_schedule_action = any(p in user_input for p in schedule_action_phrases)
+
+        if is_schedule_action:
             if role == "HR":
                 state["intent"] = "schedule_request"
             else:
                 state["intent"] = "general"
-                state["output"] = "Sorry, scheduling meetings is only available to HR. I can help you with leave requests or policy questions."
+                state["output"] = (
+                    "Sorry, scheduling meetings is only available to HR. "
+                    "I can help you with leave requests or policy questions."
+                )
                 state["step"] = "completed"
-        # Check for query intents
-        elif "balance" in user_input or "policy" in user_input:
-            state["intent"] = "query_request"
-        elif "leave" in user_input:
-            state["intent"] = "leave_request"
-        elif "email" in user_input:
+
+        # ── PRIORITY 2: Email Agent ───────────────────────────────────
+        # Must be an ACTION phrase — not just a question mentioning "email"
+        elif any(p in user_input for p in [
+            "send an email", "send email", "send a mail",
+            "write an email", "write email",
+            "compose an email", "compose email",
+            "email to ", "mail to ",
+        ]):
             state["intent"] = "email_request"
+
+        # ── PRIORITY 3: Leave Agent ───────────────────────────────────
+        # Explicit apply/request/take leave actions
+        elif any(p in user_input for p in [
+            "apply for leave", "apply leave",
+            "request leave", "request for leave",
+            "take leave", "take a leave",
+            "want to take leave", "want leave",
+            "need leave", "need to take leave",
+            "book leave", "book a leave",
+            "i want to apply", "i need to apply",
+            "can i apply", "apply for",
+            "submit leave", "raise leave",
+        ]):
+            state["intent"] = "leave_request"
+
+        # ── PRIORITY 4: Query Agent ───────────────────────────────────
+        # Questions about leave data or HR policy
+        elif any(p in user_input for p in [
+            "leave balance", "my balance",
+            "how many leave", "leaves remaining", "leaves left",
+            "leave status", "my leave status",
+            "is my leave", "is me apply",
+            "leave approved", "leave pending", "leave rejected",
+            "leave policy", "casual leave policy",
+            "sick leave policy", "earned leave policy",
+            "what is casual leave", "what is sick leave",
+            "what is earned leave", "explain leave",
+            "check my leave", "show my leave",
+            "my leave request", "leave history",
+        ]):
+            state["intent"] = "query_request"
+
+        # ── PRIORITY 5: General fallback ──────────────────────────────
         else:
             state["intent"] = "general"
-    # If we're already in a workflow, preserve the current intent
-    # (don't override based on keywords that might appear in body text)
 
     return state
 

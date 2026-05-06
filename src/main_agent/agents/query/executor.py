@@ -4,12 +4,13 @@ Answers employee queries using ChromaDB (policy) + MySQL (leave balance)
 """
 
 import os
-from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from src.tools.db_connection import get_db
+from src.config import get_settings
+from src.logger import get_logger
 from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
@@ -18,13 +19,14 @@ from src.main_agent.memory import (
 )
 from langsmith import traceable
 
-load_dotenv()
+logger = get_logger(__name__)
+_settings = get_settings()
 
 # Initialize Groq LLM
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0.3,
-    api_key=os.getenv("GROQ_API_KEY"),
+    api_key=_settings.GROQ_API_KEY,
 )
 
 # ChromaDB settings
@@ -61,7 +63,7 @@ def query_policy_chunks(query: str, k: int = 3) -> list[str]:
         results = db.similarity_search(query, k=k)
         return [doc.page_content for doc in results]
     except Exception as e:
-        print(f"Policy DB error: {e}")
+        logger.error("Policy DB error: %s", e)
         return []
 
 
@@ -76,7 +78,7 @@ def get_employee_balance(employee_id: int) -> dict:
         FROM leaves
         WHERE employee_id = %s 
         AND leave_type = %s 
-        AND status IN ('approved', 'pending_approval')
+        AND status IN ('approved', 'pending')
         """
         result = db.execute_query(query, (employee_id, leave_type))
         used_days = result[0]["total_used"] if result else 0
@@ -125,15 +127,18 @@ def format_status_response(leaves: list) -> str:
     return response
 
 
-SYSTEM_PROMPT = """You are a helpful HR Query Assistant. 
-Answer employee questions about company policies and leave balance.
+SYSTEM_PROMPT = """You are NovaHR, an AI-powered HR Assistant. Your name is NovaHR.
+
+You specialize in answering employee questions about company policies and leave balances.
 
 Rules:
-1. For leave balance questions - use the provided balance data directly
-2. For policy questions - use the retrieved policy chunks to answer
+1. For leave balance questions — use the provided balance data directly
+2. For policy questions — use the retrieved policy chunks to answer
 3. If you don't know the answer, say so honestly
 4. Keep responses clear and concise
-5. If referring to policy, mention the source"""
+5. If referring to policy, mention the source
+6. If asked your name, say: "I'm NovaHR, your AI HR assistant!"
+"""
 
 
 @traceable(name="Query Agent")
@@ -196,6 +201,15 @@ def query_agent(state: dict) -> dict:
         # Now answer the query
         user_lower = user_input.lower()
 
+        # Build base messages with long-term memory context
+        long_term_memory = state.get("long_term_memory", [])
+        base_messages = [SystemMessage(content=SYSTEM_PROMPT)]
+        if long_term_memory:
+            memory_context = "\n".join([f"- {mem}" for mem in long_term_memory])
+            base_messages.append(SystemMessage(
+                content=f"[PAST MEMORY ABOUT THIS USER]\n{memory_context}\n[END MEMORY]"
+            ))
+
         # Check if asking about POLICY (not balance) - higher priority
         if "policy" in user_lower or "what is" in user_lower or "explain" in user_lower:
             if not any(
@@ -206,8 +220,7 @@ def query_agent(state: dict) -> dict:
                 chunks = query_policy_chunks(user_input, k=3)
                 if chunks:
                     context = "\n\n".join([f"Policy: {chunk}" for chunk in chunks])
-                    messages = [
-                        SystemMessage(content=SYSTEM_PROMPT),
+                    messages = base_messages + [
                         HumanMessage(
                             content=f"Context from company policy:\n{context}\n\nQuestion: {user_input}"
                         ),
@@ -287,8 +300,7 @@ def query_agent(state: dict) -> dict:
                 context = "\n\n".join([f"Policy: {chunk}" for chunk in chunks])
 
                 # Create messages for LLM
-                messages = [
-                    SystemMessage(content=SYSTEM_PROMPT),
+                messages = base_messages + [
                     HumanMessage(
                         content=f"Context from company policy:\n{context}\n\nQuestion: {user_input}"
                     ),
@@ -304,7 +316,7 @@ def query_agent(state: dict) -> dict:
         add_assistant_message_to_memory(memory, response)
 
     except Exception as e:
-        print(f"Query agent error: {e}")
+        logger.error("Query agent error: %s", e)
         response = "I'm having trouble processing your request. Please try again."
         add_assistant_message_to_memory(memory, response)
 

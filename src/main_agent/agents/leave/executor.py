@@ -1,16 +1,13 @@
 """
 Leave Management Agent for NovaHR - Simplified Non-LLM Version
 Step-based workflow for processing leave requests
-No LLM dependency to avoid rate limit issues
-Now includes conversation history with ConversationBufferWindowMemory (window: 10)
-Stores memory in State instead of globals
-
-Standalone mode: python run_main_agent.py (or use employee_agent)
 """
 
 import argparse
 from datetime import datetime, timedelta
+import dateutil.parser
 from src.tools.db_connection import get_db
+from src.logger import get_logger
 from src.main_agent.memory import (
     create_memory_list_from_dict,
     serialize_memory_for_state,
@@ -18,6 +15,8 @@ from src.main_agent.memory import (
     add_assistant_message_to_memory,
 )
 from langsmith import traceable
+
+logger = get_logger(__name__)
 
 # Leave policy - days allowed per year
 LEAVE_POLICY = {
@@ -28,33 +27,33 @@ LEAVE_POLICY = {
 
 
 def parse_date(date_input: str) -> str:
-    """Parse flexible date input and return YYYY-MM-DD format"""
+    """
+    Parse flexible date input and return YYYY-MM-DD format.
+    Handles ISO format directly to avoid dateutil day/month swap bug.
+    """
     date_input = date_input.strip().lower()
 
-    # Handle special cases
     if date_input == "today":
         return datetime.now().strftime("%Y-%m-%d")
-    elif date_input == "tomorrow":
+    if date_input in ("tomorrow", "next day"):
         return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Try various date formats
-    formats = [
-        "%Y-%m-%d",  # 2025-05-15
-        "%d/%m/%Y",  # 15/05/2025
-        "%d-%m-%Y",  # 15-05-2025
-        "%B %d, %Y",  # May 15, 2025
-        "%d %B %Y",  # 15 May 2025
-        "%d %b %Y",  # 15 May 2025 (short)
-    ]
-
-    for fmt in formats:
+    # Handle ISO format directly — dateutil with dayfirst=True swaps day/month
+    # e.g. "2026-05-10" would become "2026-10-05" if passed to dateutil
+    import re
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", date_input):
         try:
-            parsed = datetime.strptime(date_input, fmt)
-            return parsed.strftime("%Y-%m-%d")
+            datetime.strptime(date_input, "%Y-%m-%d")
+            return date_input  # already correct format
         except ValueError:
-            continue
+            return None
 
-    return None
+    # For all other formats (May 10, 15/05/2026, etc.) use dateutil
+    try:
+        parsed = dateutil.parser.parse(date_input, dayfirst=True)
+        return parsed.strftime("%Y-%m-%d")
+    except (ValueError, OverflowError):
+        return None
 
 
 def calculate_days(start_date: str, end_date: str) -> int:
@@ -297,6 +296,7 @@ def leave_agent(state: dict) -> dict:
             state["step"] = "identify_employee"
 
     except Exception as e:
+        logger.error("Leave agent error: %s", e)
         response = f"Error processing request: {str(e)}"
         state["step"] = "error"
 
