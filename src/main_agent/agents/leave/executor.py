@@ -5,7 +5,9 @@ Step-based workflow for processing leave requests
 
 import argparse
 from datetime import datetime, timedelta
+import re
 import dateutil.parser
+from dateutil.relativedelta import relativedelta, MO, TU, WE, TH, FR, SA, SU
 from src.tools.db_connection import get_db
 from src.logger import get_logger
 from src.main_agent.memory import (
@@ -25,32 +27,93 @@ LEAVE_POLICY = {
     "SL": 12,  # Sick Leave
 }
 
+# Weekday name → dateutil relativedelta weekday object
+_WEEKDAYS = {
+    "monday": MO, "mon": MO,
+    "tuesday": TU, "tue": TU,
+    "wednesday": WE, "wed": WE,
+    "thursday": TH, "thu": TH,
+    "friday": FR, "fri": FR,
+    "saturday": SA, "sat": SA,
+    "sunday": SU, "sun": SU,
+}
+
+
+def _next_weekday(weekday_obj) -> datetime:
+    """Return the next occurrence of a weekday (always in the future)."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # +1 ensures we get the NEXT occurrence, not today even if today matches
+    return today + relativedelta(weekday=weekday_obj(+1))
+
+
+def _this_weekday(weekday_obj) -> datetime:
+    """Return the nearest upcoming occurrence of a weekday (could be today)."""
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return today + relativedelta(weekday=weekday_obj)
+
 
 def parse_date(date_input: str) -> str:
     """
     Parse flexible date input and return YYYY-MM-DD format.
-    Handles ISO format directly to avoid dateutil day/month swap bug.
-    """
-    date_input = date_input.strip().lower()
 
-    if date_input == "today":
+    Handles:
+    - "today", "tomorrow", "yesterday"
+    - "next friday", "next monday", etc.
+    - "this friday", "this week friday"
+    - "next week"
+    - ISO format: "2026-05-10"  (no day/month swap)
+    - Natural language: "May 10", "15/05/2026", "May 10 2026"
+    """
+    raw = date_input.strip()
+    s = raw.lower()
+
+    # ── Exact relative keywords ───────────────────────────────────────────────
+    if s in ("today",):
         return datetime.now().strftime("%Y-%m-%d")
-    if date_input in ("tomorrow", "next day"):
+
+    if s in ("tomorrow", "next day", "tmrw", "tmr"):
         return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Handle ISO format directly — dateutil with dayfirst=True swaps day/month
-    # e.g. "2026-05-10" would become "2026-10-05" if passed to dateutil
-    import re
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", date_input):
+    if s in ("yesterday",):
+        return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    if s in ("next week",):
+        return (datetime.now() + timedelta(weeks=1)).strftime("%Y-%m-%d")
+
+    # ── "next <weekday>" ──────────────────────────────────────────────────────
+    next_match = re.match(r"^next\s+(\w+)$", s)
+    if next_match:
+        day_name = next_match.group(1)
+        if day_name in _WEEKDAYS:
+            return _next_weekday(_WEEKDAYS[day_name]).strftime("%Y-%m-%d")
+
+    # ── "this <weekday>" ─────────────────────────────────────────────────────
+    this_match = re.match(r"^this\s+(\w+)$", s)
+    if this_match:
+        day_name = this_match.group(1)
+        if day_name in _WEEKDAYS:
+            return _this_weekday(_WEEKDAYS[day_name]).strftime("%Y-%m-%d")
+
+    # ── "coming <weekday>" ───────────────────────────────────────────────────
+    coming_match = re.match(r"^coming\s+(\w+)$", s)
+    if coming_match:
+        day_name = coming_match.group(1)
+        if day_name in _WEEKDAYS:
+            return _next_weekday(_WEEKDAYS[day_name]).strftime("%Y-%m-%d")
+
+    # ── ISO format: YYYY-MM-DD (handle directly — dateutil swaps day/month) ──
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
         try:
-            datetime.strptime(date_input, "%Y-%m-%d")
-            return date_input  # already correct format
+            datetime.strptime(s, "%Y-%m-%d")
+            return s
         except ValueError:
             return None
 
-    # For all other formats (May 10, 15/05/2026, etc.) use dateutil
+    # ── All other formats via dateutil (May 10, 15/05/2026, etc.) ────────────
+    # Strip ordinal suffixes first: "10th" → "10", "1st" → "1", "3rd" → "3"
+    cleaned = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", raw, flags=re.IGNORECASE)
     try:
-        parsed = dateutil.parser.parse(date_input, dayfirst=True)
+        parsed = dateutil.parser.parse(cleaned, dayfirst=True)
         return parsed.strftime("%Y-%m-%d")
     except (ValueError, OverflowError):
         return None
@@ -177,7 +240,7 @@ def leave_agent(state: dict) -> dict:
                 leave_data = state.get("leave_data", {})
                 leave_data["leave_type"] = leave_type
                 state["leave_data"] = leave_data
-                response = f"Got it, you need {leave_type}. When do you want to take leave? (e.g., '2026-05-05 to 2026-05-06')"
+                response = f"Got it, you need {leave_type}. When do you want to take leave? (e.g., 'tomorrow to next Friday' or 'May 10 to May 15')"
                 state["step"] = "ask_dates"
             else:
                 response = "Please specify leave type: EL (Earned Leave), CL (Casual Leave), or SL (Sick Leave)"
@@ -185,39 +248,47 @@ def leave_agent(state: dict) -> dict:
 
         # ==================== STEP 3: GET DATES ====================
         elif step == "ask_dates":
-            # Try to parse dates from input
-            if " to " in user_input or "-" in user_input:
-                if " to " in user_input:
-                    parts = user_input.split(" to ")
-                else:
-                    parts = user_input.split("-")
+            # Strip common leading words users naturally add
+            cleaned_input = user_input.strip()
+            for prefix in ("from ", "between ", "starting ", "starting from "):
+                if cleaned_input.startswith(prefix):
+                    cleaned_input = cleaned_input[len(prefix):]
+                    break
 
-                if len(parts) == 2:
-                    start_date = parse_date(parts[0].strip())
-                    end_date = parse_date(parts[1].strip())
+            # Split on " to " — the only reliable separator
+            # Do NOT split on "-" because ISO dates like "2026-05-10" contain "-"
+            if " to " in cleaned_input:
+                parts = cleaned_input.split(" to ", 1)  # max 1 split
+                start_date = parse_date(parts[0].strip())
+                end_date = parse_date(parts[1].strip())
 
-                    if start_date and end_date:
-                        days = calculate_days(start_date, end_date)
-                        if days > 0:
-                            leave_data = state.get("leave_data", {})
-                            leave_data["start_date"] = start_date
-                            leave_data["end_date"] = end_date
-                            leave_data["days"] = days
-                            state["leave_data"] = leave_data
-                            response = f"I see, {days} days from {start_date} to {end_date}. Any reason for this leave?"
-                            state["step"] = "ask_reason"
-                        else:
-                            response = "Invalid date range. Start date must be before end date. Please try again."
-                            state["step"] = "ask_dates"
+                if start_date and end_date:
+                    days = calculate_days(start_date, end_date)
+                    if days > 0:
+                        leave_data = state.get("leave_data", {})
+                        leave_data["start_date"] = start_date
+                        leave_data["end_date"] = end_date
+                        leave_data["days"] = days
+                        state["leave_data"] = leave_data
+                        response = f"I see, {days} days from {start_date} to {end_date}. Any reason for this leave?"
+                        state["step"] = "ask_reason"
                     else:
-                        response = "I couldn't parse those dates. Please use format: '2026-05-05' or 'May 5'"
+                        response = "Invalid date range. Start date must be before end date. Please try again."
                         state["step"] = "ask_dates"
                 else:
-                    response = "Please provide both start and end dates separated by 'to' (e.g., '2026-05-05 to 2026-05-06')"
+                    failed = parts[0].strip() if not start_date else parts[1].strip()
+                    response = (
+                        f"I couldn't understand the date '{failed}'. "
+                        "Try formats like: 'tomorrow to next Friday', "
+                        "'May 10 to May 15', or '2026-05-10 to 2026-05-15'"
+                    )
                     state["step"] = "ask_dates"
             else:
                 response = (
-                    "Please provide date range (e.g., '2026-05-05 to 2026-05-06')"
+                    "Please provide a date range using 'to', for example:\n"
+                    "• 'tomorrow to next Friday'\n"
+                    "• 'May 10 to May 15'\n"
+                    "• '2026-05-10 to 2026-05-15'"
                 )
                 state["step"] = "ask_dates"
 
