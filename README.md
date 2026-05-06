@@ -4,32 +4,31 @@
 
 ---
 
-## 📚 Quick Navigation
+## Quick Navigation
 
 | Section | Description |
 |---------|-------------|
-| [🚀 Quick Start](#-quick-start) | Get up and running in 10 minutes |
-| [✨ Features](#-features) | What NovaHR can do |
-| [📁 Project Structure](#-project-structure) | Folder layout |
-| [🛠 Installation](#-installation) | Full setup guide |
-| [▶️ Running the App](#️-running-the-application) | Start backend & frontend |
-| [📖 Usage](#-usage) | How to use the system |
-| [🔌 API Endpoints](#-api-endpoints) | All REST endpoints |
-| [🏗 Architecture](#-architecture) | System design & agent flow |
-| [🧠 Memory System](#-memory-system) | Long-term memory with ChromaDB |
-| [🧹 Memory Cleanup](#-memory-cleanup) | Automatic & manual cleanup |
-| [🔍 LangSmith Tracing](#-langsmith-tracing) | Agent observability |
-| [📊 HR Dashboard Troubleshooting](#-hr-dashboard-troubleshooting) | Fix dashboard issues |
-| [🔐 Security](#-security) | Auth & access control |
-| [📊 Database Schema](#-database-schema) | Tables & columns |
-| [🛠 Tech Stack](#-tech-stack) | Libraries & tools used |
-| [📝 Environment Variables](#-environment-variables) | All `.env` keys |
-| [🐛 Troubleshooting](#-troubleshooting) | Common issues & fixes |
-| [📈 Project Analysis](#-project-analysis) | Improvements & recommendations |
+| [Quick Start](#quick-start) | Get up and running in 10 minutes |
+| [Features](#features) | What NovaHR can do |
+| [Project Structure](#project-structure) | Folder layout |
+| [Installation](#installation) | Full setup guide |
+| [Running the App](#running-the-application) | Start backend and frontend |
+| [Usage](#usage) | How to use the system |
+| [API Endpoints](#api-endpoints) | All REST endpoints |
+| [Architecture](#architecture) | System design and agent flow |
+| [Memory System](#memory-system) | Long-term memory with ChromaDB |
+| [Memory Cleanup](#memory-cleanup) | Automatic and manual cleanup |
+| [LangSmith Tracing](#langsmith-tracing) | Agent observability |
+| [Scripts](#scripts) | Utility scripts |
+| [Security](#security) | Auth and access control |
+| [Database Schema](#database-schema) | Tables and columns |
+| [Tech Stack](#tech-stack) | Libraries and tools used |
+| [Environment Variables](#environment-variables) | All `.env` keys |
+| [Troubleshooting](#troubleshooting) | Common issues and fixes |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Clone and enter project
@@ -55,7 +54,7 @@ python auth/setup_auth.py
 python src/tools/embed_policy.py
 
 # 7. Start backend
-python start_api.py
+python scripts/start_api.py
 
 # 8. Start frontend (new terminal)
 cd novahr-frontend
@@ -64,117 +63,149 @@ npm start
 ```
 
 Open `http://localhost:3000` and login:
-- **HR:** `debu@gmail.com` / `721242`
-- **Employee:** `rahul@gmail.com` / `123`
+- **HR:** `debabratadey9090@gmail.com` / your password
+- **Employee:** `sayandip05@gmail.com` / your password
 
 ---
 
-## ✨ Features
+## Features
 
-### 🤖 AI Assistant
-- **Multi-Agent System** — LangGraph-powered routing to specialized agents
+### AI Assistant
+- **Multi-Agent System** — LangGraph-powered routing to 5 specialized agents
 - **Leave Management** — Apply for leave with natural language
-- **Email Automation** — Compose and send emails via Gmail SMTP
-- **Calendar Integration** — Schedule meetings with Google Calendar
+- **Email Automation** — Compose and send emails via Gmail SMTP with smart recipient detection
+- **Calendar Integration** — Schedule meetings with Google Calendar (HR only)
 - **Policy Q&A** — ChromaDB vector search over company policy documents
 - **Leave Balance Queries** — Real-time balance checks from MySQL
-- **Long-term Memory** — Remembers important facts across sessions *(NEW)*
+- **Long-term Memory** — Remembers important facts across sessions via ChromaDB
 - **LangSmith Tracing** — Full observability of all agent executions
 
-### 👔 HR Dashboard
+### HR Dashboard
 - **Leave Request Management** — View all employee leave requests
 - **Approve/Reject** — One-click approval/rejection with instant updates
-- **Statistics** — Real-time counts (Total, Pending, Approved, Rejected)
-- **Filter & Search** — Filter by status, search by employee
-- **Memory Management** — View and manage user memories via API *(NEW)*
+- **Statistics** — Real-time counts (Total, Pending, Approved, Rejected) with bar chart
+- **Filter by Status** — Filter leave requests by All, Pending, Approved, Rejected
+- **Memory Management Panel** — HR-only section at the bottom of the dashboard to view all employees' stored memories, clear per-user memories, and run manual cleanup with a configurable day threshold
 
-### 🔐 Authentication & Security
+### Authentication and Security
 - **JWT Token-based Auth** — Secure login with bcrypt password hashing
 - **Role-based Access** — HR and Employee roles with different permissions
 - **Session Management** — Stateful conversations with per-user sessions
-- **Automatic Memory Cleanup** — TTL-based cleanup every 30 days *(NEW)*
+- **Automatic Memory Cleanup** — TTL-based cleanup every 30 days via APScheduler
 
-### 🌐 REST API
+### REST API
 - **FastAPI Backend** — Auto-generated Swagger docs at `/docs`
 - **CORS Enabled** — Ready for frontend integration
 - **Protected Endpoints** — JWT verification on all sensitive routes
-- **Memory API** — Endpoints for memory stats and management *(NEW)*
+- **Memory API** — Endpoints for memory stats and management
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 NovaHR/
-├── api/                          # FastAPI backend
+├── api/                              # FastAPI backend
 │   ├── dependencies/
-│   │   └── auth.py              # JWT verification
+│   │   └── auth.py                  # JWT verification middleware
 │   ├── routers/
-│   │   ├── auth.py              # Login endpoint
-│   │   ├── chat.py              # Chat with AI agent + memory integration
-│   │   ├── leaves.py            # Leave management (HR only)
-│   │   └── memory.py            # Memory management API
-│   ├── main.py                  # FastAPI app + auto cleanup scheduler
-│   └── models.py                # Pydantic models
+│   │   ├── auth.py                  # Login endpoint
+│   │   ├── chat.py                  # Chat endpoint + memory integration
+│   │   ├── leaves.py                # Leave management (HR only)
+│   │   └── memory.py                # Memory management API
+│   ├── main.py                      # FastAPI app, CORS, APScheduler
+│   └── models.py                    # Pydantic models (ChatRequest, ChatResponse, etc.)
 │
 ├── auth/
-│   ├── auth.py                  # Login logic + JWT creation
-│   └── setup_auth.py            # Database setup script
+│   ├── auth.py                      # Login logic + JWT creation
+│   └── setup_auth.py                # Database setup script (adds password/auth_role columns)
 │
 ├── src/
+│   ├── config.py                        # Centralized config via pydantic-settings
+│   ├── logger.py                        # Shared logging setup (get_logger)
 │   ├── main_agent/
 │   │   ├── agents/
-│   │   │   ├── email/           # Email agent
-│   │   │   ├── leave/           # Leave agent
-│   │   │   ├── query/           # Policy Q&A agent
-│   │   │   ├── scheduling/      # Calendar agent
-│   │   │   ├── employee/        # Employee portal
-│   │   │   └── general/         # General conversation (uses long-term memory)
-│   │   ├── memory.py            # Short-term conversation memory
-│   │   └── router.py            # LangGraph routing + State definition
+│   │   │   ├── email/               # Email agent (yagmail, smart recipient detection)
+│   │   │   ├── leave/               # Leave agent (multi-step workflow, non-LLM)
+│   │   │   ├── query/               # Query agent (policy Q&A + leave balance)
+│   │   │   ├── scheduling/          # Schedule agent (Google Calendar, HR only, IST-aware)
+│   │   │   ├── employee/            # Employee portal agent
+│   │   │   └── general/             # General conversation agent (uses long-term memory)
+│   │   ├── memory.py                # ConversationBufferWindowMemory with summarization
+│   │   └── router.py                # LangGraph StateGraph + intent routing
 │   ├── tools/
-│   │   ├── db_connection.py     # MySQL utility
-│   │   └── embed_policy.py      # PDF embedder
+│   │   ├── db_connection.py         # MySQL with tenacity retry + ping reconnect
+│   │   └── embed_policy.py          # PDF embedder for policy documents into ChromaDB
 │   └── utils/
-│       ├── memory_store.py      # ChromaDB long-term memory storage
-│       └── memory_filter.py     # LLM-based + keyword filtering
+│       ├── memory_store.py          # ChromaDB long-term memory (store, search, cleanup)
+│       └── memory_filter.py         # LLM-based + keyword filtering for what to store
 │
-├── novahr-frontend/             # React frontend
+├── novahr-frontend/                 # React frontend
 │   └── src/
 │       ├── pages/
-│       │   ├── Login.jsx
-│       │   ├── Chat.jsx
-│       │   └── Dashboard.jsx
+│       │   ├── Landing.jsx          # Animated public landing page
+│       │   ├── Login.jsx            # Dark-themed auth form
+│       │   ├── Chat.jsx             # ChatGPT-style AI assistant interface
+│       │   ├── Dashboard.jsx        # HR leave management with charts
+│       │   └── NotFound.jsx         # 404 page
+│       ├── components/
+│       │   └── ui/
+│       │       ├── Button.jsx
+│       │       ├── Card.jsx
+│       │       ├── ChatBubble.jsx
+│       │       ├── Input.jsx
+│       │       └── LoadingSpinner.jsx
 │       ├── services/
-│       │   ├── authService.js
-│       │   ├── chatService.js
-│       │   └── leaveService.js
-│       └── utils/
-│           └── session.js
+│       │   ├── authService.js       # Login, logout, getUser, getToken
+│       │   ├── chatService.js       # sendMessage, clearSession
+│       │   ├── leaveService.js      # getLeaves, getLeaveStats, approve, reject
+│       │   └── memoryService.js     # getMemoryStats, getAllUsersMemories, cleanup
+│       ├── config/
+│       │   └── api.js               # Centralized API base URL
+│       ├── utils/
+│       │   └── session.js           # Session ID management (localStorage)
+│       └── App.jsx                  # React Router setup + protected routes
+│
+├── scripts/
+│   ├── start_api.py                 # Starts uvicorn server on port 8000
+│   ├── add_employee.py              # Add employees or reset passwords (interactive CLI)
+│   └── cleanup_memory.py            # Manual memory cleanup script
 │
 ├── data/
 │   ├── NovaHR_Company_Policy_Notebook.pdf
-│   ├── chroma_db/               # Policy vector database
-│   └── long_term_memory/        # Long-term memory vector database
+│   ├── chroma_db/                   # Policy vector database
+│   └── long_term_memory/            # Long-term memory vector database
 │
-├── .env                         # Environment variables
-├── requirements.txt             # Python dependencies
-├── start_api.py                 # API server launcher
-├── cleanup_memory.py            # Manual memory cleanup script
-├── run_main_agent.py            # CLI for HR
-└── run_employee_agent.py        # CLI for employees
+├── tests/
+│   ├── conftest.py                  # Shared pytest fixtures (DB, tokens, client)
+│   ├── test_auth.py                 # Authentication tests
+│   ├── test_leave_agent.py          # Leave agent + date parsing tests
+│   ├── test_email_agent.py          # Email agent + recipient parsing tests
+│   ├── test_query_agent.py          # Policy Q&A + leave balance tests
+│   ├── test_scheduling_agent.py     # Scheduling agent + IST datetime tests
+│   ├── test_memory.py               # Memory filter + ChromaDB store tests
+│   ├── test_api_endpoints.py        # FastAPI endpoint integration tests
+│   ├── test_router.py               # Intent routing tests (all 22 cases)
+│   └── test_connections.py          # Basic connection checks
+│
+├── pytest.ini                       # Pytest configuration
+│
+├── .env                             # Environment variables (not committed)
+├── .env.example                     # Environment variable template
+├── requirements.txt                 # Python dependencies
+└── Credentials.json                 # Google Calendar OAuth credentials
 ```
 
 ---
 
-## 🛠 Installation
+## Installation
 
 ### Prerequisites
 - Python 3.9+
-- Node.js 16+
+- Node.js 18+
 - MySQL 8.0+
-- Gmail account (for email features)
-- Google Cloud project (for calendar features)
+- Gmail account with App Password (for email features)
+- Google Cloud project with Calendar API enabled (for scheduling features)
 
 ### 1. Clone Repository
 ```bash
@@ -218,6 +249,11 @@ LANGCHAIN_PROJECT=novahr
 LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 ```
 
+Generate a secure SECRET_KEY:
+```python
+import secrets; print(secrets.token_urlsafe(32))
+```
+
 #### Setup MySQL Database
 ```sql
 CREATE DATABASE novahr;
@@ -245,21 +281,24 @@ CREATE TABLE leaves (
     FOREIGN KEY (employee_id) REFERENCES employees(id)
 );
 
-INSERT INTO employees (name, email, department, auth_role) VALUES
-('Debu', 'debu@gmail.com', 'Engineering', 'HR'),
-('Rahul', 'rahul@gmail.com', 'HR', 'EMPLOYEE'),
-('Priya', 'priya@gmail.com', 'Marketing', 'EMPLOYEE');
+-- Insert initial employees
+INSERT INTO employees (name, email, department) VALUES
+('Debabrata Dey', 'debabratadey9090@gmail.com', 'HR'),
+('Sayandip Bar', 'sayandip05@gmail.com', 'Finance');
 ```
 
-#### Setup Authentication
+#### Setup Authentication (hashes passwords + sets roles)
 ```bash
 python auth/setup_auth.py
 ```
-Default credentials after setup:
-- HR: `debu@gmail.com` / `721242`
-- Employee: `rahul@gmail.com` / `123`
 
-#### Embed Company Policy
+Default credentials after setup:
+- HR (first employee): `debabratadey9090@gmail.com` — password set via `scripts/add_employee.py`
+- Employee (all others): `sayandip05@gmail.com` — password set via `scripts/add_employee.py`
+
+> To reset any password: `python scripts/add_employee.py` → option 2
+
+#### Embed Company Policy into ChromaDB
 ```bash
 python src/tools/embed_policy.py
 ```
@@ -272,15 +311,15 @@ npm install
 
 ---
 
-## ▶️ Running the Application
+## Running the Application
 
 ### Start Backend (Terminal 1)
 ```bash
-python start_api.py
+python scripts/start_api.py
 ```
 - API: `http://localhost:8000`
 - Swagger docs: `http://localhost:8000/docs`
-- On startup you'll see: `[SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)`
+- On startup: `[SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)`
 
 ### Start Frontend (Terminal 2)
 ```bash
@@ -291,156 +330,188 @@ npm start
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### Web Interface
 
+#### User Flow
+1. Visit `http://localhost:3000` — animated landing page
+2. Click **Get Started** or **Sign In** — goes to login
+3. Login — redirects to Chat
+4. HR users can navigate to the Dashboard from the chat sidebar
+
 #### Login
-Go to `http://localhost:3000` and login with:
-- **HR:** `debu@gmail.com` / `721242`
-- **Employee:** `rahul@gmail.com` / `123`
+- **HR:** `debabratadey9090@gmail.com` (Debabrata Dey)
+- **Employee:** `sayandip05@gmail.com` (Sayandip Bar)
 
 #### Chat with AI Assistant
-- Ask questions: *"What is my leave balance?"*
+- Check balance: *"What is my leave balance?"*
 - Apply for leave: *"I want to apply for leave"*
-- Schedule meetings: *"Schedule a meeting tomorrow at 3pm"*
-- Check policy: *"What is the casual leave policy?"*
+- Check status: *"Is my leave approved?"*
+- Policy questions: *"What is the casual leave policy?"*
+- Send email: *"Send email to all HR employees"*
+- Schedule meeting (HR only): *"Schedule a meeting tomorrow at 3pm"*
 - The agent remembers important facts across sessions via long-term memory
 
-#### HR Dashboard (HR only)
+#### HR Dashboard
 - Navigate to `http://localhost:3000/dashboard`
-- View all leave requests
-- Approve/reject with one click
-- Filter by status (All, Pending, Approved, Rejected)
-
-### CLI Interface
-
-#### HR Agent (Full Access)
-```bash
-python run_main_agent.py
-```
-
-#### Employee Portal (Leave + Queries)
-```bash
-python run_employee_agent.py
-```
+- View all leave requests with employee details
+- Approve or reject with one click
+- Filter by status: All, Pending, Approved, Rejected
+- Bar chart visualization of leave statistics
 
 ---
 
-## 🔌 API Endpoints
+## API Endpoints
 
 ### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/auth/login` | Login and get JWT token |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/auth/login` | No | Login and get JWT token |
 
 ### Chat
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `POST` | `/api/chat` | ✓ | Send message to AI agent |
-| `GET` | `/api/chat/session/{id}` | ✓ | Get session info |
-| `DELETE` | `/api/chat/session/{id}` | ✓ | Clear session |
+| `POST` | `/api/chat` | Yes | Send message to AI agent |
+| `GET` | `/api/chat/session/{id}` | Yes | Get session info |
+| `DELETE` | `/api/chat/session/{id}` | Yes | Clear session |
+| `GET` | `/api/chat/sessions` | Yes | List all active sessions |
 
 ### Leave Management (HR Only)
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `GET` | `/api/leaves` | ✓ HR | Get all leave requests |
-| `GET` | `/api/leaves/stats` | ✓ HR | Get leave statistics |
-| `PUT` | `/api/leaves/{id}/approve` | ✓ HR | Approve leave |
-| `PUT` | `/api/leaves/{id}/reject` | ✓ HR | Reject leave |
+| Method | Endpoint | Auth | Role | Description |
+|--------|----------|------|------|-------------|
+| `GET` | `/api/leaves` | Yes | HR | Get all leave requests |
+| `GET` | `/api/leaves/stats` | Yes | HR | Get leave statistics |
+| `PUT` | `/api/leaves/{id}/approve` | Yes | HR | Approve a leave request |
+| `PUT` | `/api/leaves/{id}/reject` | Yes | HR | Reject a leave request |
 
 ### Memory Management
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `GET` | `/api/memory/stats` | ✓ | Get memory statistics |
-| `GET` | `/api/memory/user/{user_id}` | ✓ | Get memories for a user |
-| `POST` | `/api/memory/cleanup` | ✓ HR | Cleanup old memories (custom days) |
-| `POST` | `/api/memory/cleanup/trigger` | ✓ HR | Trigger immediate cleanup (30 days) |
+| Method | Endpoint | Auth | Role | Description |
+|--------|----------|------|------|-------------|
+| `GET` | `/api/memory/stats` | Yes | Any | Get total memory count |
+| `GET` | `/api/memory/user` | Yes | Any | Get current user's memories |
+| `GET` | `/api/memory/all` | Yes | HR | Get all users' memories (grouped by user) |
+| `DELETE` | `/api/memory/user` | Yes | Any | Clear current user's memories |
+| `DELETE` | `/api/memory/user/{user_id}` | Yes | HR | Clear a specific user's memories |
+| `POST` | `/api/memory/cleanup` | Yes | HR | Cleanup old memories (custom days) |
+| `POST` | `/api/memory/cleanup/trigger` | Yes | HR | Trigger immediate cleanup (30 days) |
 
 Full interactive docs: `http://localhost:8000/docs`
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
-### Backend Flow
+### Request Flow
 ```
-User Request
-    ↓
+User (Browser)
+    |
+    v
+React Frontend (Landing / Login / Chat / Dashboard)
+    |  HTTP + Bearer JWT
+    v
 FastAPI (api/main.py)
-    ↓
+    |
+    v
 JWT Verification (api/dependencies/auth.py)
-    ↓
-Router (api/routers/*)
-    ↓
-Search Long-term Memory (ChromaDB)
-    ↓
+    |
+    v
+Chat Router (api/routers/chat.py)
+    |
+    +-- Search long-term memory (ChromaDB)
+    |
+    v
 LangGraph Agent Pipeline (src/main_agent/router.py)
-    ↓
-Specialized Agents (leave/email/query/schedule/general)
-    ↓
-Tools (MySQL, ChromaDB, Gmail, Google Calendar)
-    ↓
-Filter & Store Important Info (memory_filter + memory_store)
-    ↓
-Response
+    |
+    +-- Intent Detection (rule-based, no LLM)
+    |
+    +-------+----------+-----------+----------+----------+
+    |       |          |           |          |          |
+    v       v          v           v          v          v
+  Leave   Email     Query      Schedule   General   Employee
+  Agent   Agent     Agent       Agent      Agent     Agent
+    |       |          |           |          |
+    v       v          v           v          v
+  MySQL  Gmail      ChromaDB   Google     Groq LLM
+         SMTP       + MySQL    Calendar
+    |
+    v
+Filter + Store important info (memory_filter + memory_store)
+    |
+    v
+Response to Frontend
 ```
 
-### Agent Routing
+### Agent Routing (Intent Detection Priority)
 ```
-User Message → Router Agent
-    ├─→ Leave Agent      (apply/check leave)
-    ├─→ Email Agent      (send emails)
-    ├─→ Query Agent      (policy Q&A, balance check)
-    ├─→ Schedule Agent   (calendar events)
-    └─→ General Agent    (conversation + uses long-term memory)
+User Message
+    |
+    v
+1. Schedule Agent -- "schedule a meeting", "book a meeting", "set up a meeting" (HR only)
+2. Email Agent    -- "send an email", "send email to", "write an email"
+3. Leave Agent    -- "apply for leave", "request leave", "take leave", "want leave"
+4. Query Agent    -- leave balance, leave status, policy questions
+5. General Agent  -- everything else (conversation, questions about past events)
+```
+
+### Email Agent — Recipient Detection Priority
+```
+1. Department-based  -- "all HR employees", "engineering department"
+2. All employees     -- "all employees", "everyone", "everybody"
+3. Email addresses   -- regex extraction from message
+4. Employee names    -- case-insensitive partial DB lookup
+5. Multiple          -- "send to Sayandip and Debabrata"
 ```
 
 ---
 
-## 🧠 Memory System
+## Memory System
 
-NovaHR uses **two types of memory** working together:
+NovaHR uses two types of memory working together:
 
 ### Short-term Memory (Per Session)
 - **Type:** `ConversationBufferWindowMemory` (LangChain)
 - **Storage:** In-memory (RAM)
 - **Scope:** Current conversation only
-- **Window:** Last 5–10 messages
-- **Persistence:** Lost when session ends
+- **Window:** Last 5–10 messages per agent
+- **Persistence:** Lost when session ends or server restarts
 - **Purpose:** Maintain conversation context within a chat
 
 ### Long-term Memory (Across Sessions)
-- **Type:** ChromaDB Vector Memory
+- **Type:** ChromaDB vector embeddings
 - **Storage:** Persistent disk (`data/long_term_memory/`)
 - **Scope:** All conversations per user
 - **Persistence:** Survives server restarts
 - **Purpose:** Remember important facts across sessions
 
----
-
 ### How Long-term Memory Works
 
 ```
 User sends message
-        ↓
-1. Search ChromaDB for relevant past memories (vector similarity)
-        ↓
+    |
+    v
+1. Search ChromaDB for relevant past memories (top 3, cosine similarity)
+    |
+    v
 2. Inject memories into agent state: state["long_term_memory"]
-        ↓
+    |
+    v
 3. Agent processes message with memory context
-        ↓
+    |
+    v
 4. Filter: Is this message/response important enough to store?
-        ↓
-5. Store important info in ChromaDB with metadata
-        ↓
+    |
+    v
+5. Store important info in ChromaDB with metadata (user_id, intent, timestamp)
+    |
+    v
 Return personalized response
 ```
 
 ### What Gets Stored
 
-| Category | Keywords | Example |
-|----------|----------|---------|
+| Category | Trigger Keywords | Example |
+|----------|-----------------|---------|
 | Personal Info | "my name is", "i am", "i work in" | "My name is Debu" |
 | Leave Details | "leave", "vacation", "sick" | "I need leave from May 10-12" |
 | Work Info | "project", "deadline", "meeting" | "Working on the API project" |
@@ -450,8 +521,8 @@ Return personalized response
 
 ### What Gets Excluded
 - Trivial responses: "ok", "yes", "thanks", "bye"
-- Very short messages (< 5 characters)
-- Generic questions without context
+- Very short messages (under 5 characters)
+- Generic questions without personal context
 
 ### Memory in Action
 
@@ -462,21 +533,12 @@ Agent: "Nice to meet you, Debu!"
 → Stored in ChromaDB
 ```
 
-**Session 2 (new session, days later):**
+**Session 2 (days later):**
 ```
 User: "Who am I?"
 → ChromaDB retrieves: "My name is Debu and I work in Engineering"
 Agent: "You're Debu from the Engineering department!"
 ```
-
-### Key Files
-| File | Purpose |
-|------|---------|
-| `src/utils/memory_store.py` | ChromaDB storage & retrieval |
-| `src/utils/memory_filter.py` | LLM-based + keyword filtering |
-| `api/routers/chat.py` | Memory integration in chat endpoint |
-| `src/main_agent/agents/general/executor.py` | Agent uses memories in prompts |
-| `src/main_agent/router.py` | `long_term_memory` added to State |
 
 ### Technical Specs
 - **Embedding Model:** `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions)
@@ -484,29 +546,40 @@ Agent: "You're Debu from the Engineering department!"
 - **Similarity Metric:** Cosine similarity
 - **Results per Query:** Top 3 most relevant memories
 - **Storage Location:** `data/long_term_memory/`
-- **Latency Added:** ~80ms per request
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `src/utils/memory_store.py` | ChromaDB storage, retrieval, cleanup |
+| `src/utils/memory_filter.py` | LLM-based + keyword filtering |
+| `api/routers/chat.py` | Memory integration in chat endpoint |
+| `src/main_agent/agents/general/executor.py` | Uses memories in prompts |
+| `src/main_agent/router.py` | `long_term_memory` field in State |
 
 ---
 
-## 🧹 Memory Cleanup
+## Memory Cleanup
 
-### Automatic Cleanup (Recommended — Zero Effort)
+### Automatic Cleanup (Zero Effort)
 
-When you start the server, cleanup runs automatically in the background:
+Runs automatically every day at 2 AM when the server is running:
 
 ```bash
-python start_api.py
+python scripts/start_api.py
 # Output: [SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)
 ```
 
-- **Schedule:** Every day at 2:00 AM
-- **Action:** Deletes memories older than 30 days
-- **No manual work needed**
+Deletes memories older than 30 days for all users.
 
 ### Manual Cleanup Options
 
-#### Option 1: API Trigger (Easiest)
-Open Swagger UI at `http://localhost:8000/docs`, login, then:
+#### Option 1: HR Dashboard UI
+Navigate to `http://localhost:3000/dashboard` → scroll to the **Memory Management** section at the bottom.
+- Set the number of days in the input field (`0` = delete all memories)
+- Click **Run Cleanup**
+- The panel also shows all stored memories per employee and lets you clear individual users
+
+#### Option 2: API (Swagger UI)
 ```
 POST /api/memory/cleanup/trigger
 ```
@@ -521,28 +594,34 @@ Response:
 }
 ```
 
-#### Option 2: Command Line Script
+#### Option 3: Custom days via API
+```
+POST /api/memory/cleanup
+Body: { "days": 60 }
+```
+Use `days: 0` to delete all memories regardless of age.
+
+#### Option 4: Command Line Script
 ```bash
 # Delete memories older than 30 days (default)
-python cleanup_memory.py
+python scripts/cleanup_memory.py
 
 # Delete memories older than 60 days
-python cleanup_memory.py --days 60
+python scripts/cleanup_memory.py --days 60
 ```
 
-#### Option 3: Python Code
-```python
-from src.utils.memory_store import get_memory_store
-
-store = get_memory_store()
-store.cleanup_old_memories(days=30)        # All users
-store.clear_user_memories(user_id="1")    # Specific user
-```
+### Cleanup Day Threshold Behaviour
+| Value | Effect |
+|-------|--------|
+| `0` | Delete all memories |
+| `1` | Delete anything before today (midnight) |
+| `7` | Delete anything older than 7 days |
+| `30` | Delete anything older than 30 days (default) |
 
 ### Change Cleanup Schedule
 Edit `api/main.py`:
 ```python
-# Daily at 2 AM (current)
+# Daily at 2 AM (default)
 scheduler.add_job(cleanup_old_memories_job, trigger='cron', hour=2, minute=0)
 
 # Every 12 hours
@@ -565,16 +644,13 @@ GET /api/memory/stats
 
 ---
 
-## 🔍 LangSmith Tracing
-
-### Status: Fully Integrated ✅
+## LangSmith Tracing
 
 All agents have `@traceable` decorator for full observability:
 
 | Agent | File |
 |-------|------|
-| Router Agent | `src/main_agent/router.py` |
-| Route Decision | `src/main_agent/router.py` |
+| Router | `src/main_agent/router.py` |
 | Leave Agent | `src/main_agent/agents/leave/executor.py` |
 | Email Agent | `src/main_agent/agents/email/executor.py` |
 | Query Agent | `src/main_agent/agents/query/executor.py` |
@@ -590,109 +666,90 @@ LANGCHAIN_PROJECT=novahr
 LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 ```
 
-Then view traces at `https://smith.langchain.com/` under project `novahr`.
+View traces at `https://smith.langchain.com/` under project `novahr`.
 
 ---
 
-## 📊 HR Dashboard Troubleshooting
+## Scripts
 
-### Database Status Check
+All scripts live in the `scripts/` folder and must be run from the project root.
+
+### Start API Server
 ```bash
-python test_dashboard.py
-# Expected: Found 3 employees, Found X leave requests
+python scripts/start_api.py
+```
+Starts uvicorn on `http://localhost:8000` with hot-reload enabled.
+
+### Employee Management
+```bash
+python scripts/add_employee.py
+```
+Interactive CLI with two options:
+
+**1. Add new employee**
+- Prompts for name, email, department, role (EMPLOYEE/HR), password
+- Validates email uniqueness
+- Hashes password with bcrypt (10 rounds)
+
+**2. Reset employee password**
+- Search by name (partial match) or email (exact match)
+- Handles multiple matches with a selection list
+- Confirms before updating
+
+### Memory Cleanup
+```bash
+# Default: delete memories older than 30 days
+python scripts/cleanup_memory.py
+
+# Custom threshold
+python scripts/cleanup_memory.py --days 60
 ```
 
-### Dashboard Not Showing Data — Step by Step
+### Run Tests
+```bash
+# Run full test suite (134 tests)
+python -m pytest tests/ -v
 
-**Step 1: Verify backend is running**
+# Run a specific test file
+python -m pytest tests/test_auth.py -v
+
+# Run with short output
+python -m pytest tests/ --tb=short
 ```
-http://localhost:8000/docs  ← Should open Swagger UI
-```
-
-**Step 2: Test API directly in browser console (F12)**
-```javascript
-// Login and get token
-fetch('http://localhost:8000/api/auth/login', {
-  method: 'POST',
-  headers: {'Content-Type': 'application/json'},
-  body: JSON.stringify({ email: 'debu@gmail.com', password: '721242' })
-}).then(r => r.json()).then(d => {
-  localStorage.setItem('token', d.token);
-  localStorage.setItem('user', JSON.stringify(d.user));
-  console.log('Logged in:', d.user.auth_role);
-});
-
-// Fetch leaves (run after login)
-fetch('http://localhost:8000/api/leaves', {
-  headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-}).then(r => r.json()).then(d => console.log('Leaves:', d));
-```
-
-**Step 3: Check user role**
-```javascript
-const user = JSON.parse(localStorage.getItem('user'));
-console.log('Role:', user.auth_role); // Must be "HR"
-```
-
-### Common Issues & Fixes
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| "Access denied. HR role required" | Wrong user role | Login as `debu@gmail.com` (HR) |
-| Dashboard empty, no error | Token expired | `localStorage.clear()` then re-login |
-| "Cannot connect to server" | Backend not running | Run `python start_api.py` |
-| Data loads but doesn't display | JS error | Check browser console (F12) |
-
-### Quick Reset
-```javascript
-// In browser console — clears auth and reloads
-localStorage.clear();
-sessionStorage.clear();
-window.location.href = '/';
-```
-
-### Verification Checklist
-- [ ] Backend running (`python start_api.py`)
-- [ ] Frontend running (`npm start` in `novahr-frontend/`)
-- [ ] Logged in as HR (`debu@gmail.com`)
-- [ ] Token in localStorage
-- [ ] No errors in browser console (F12)
-- [ ] API returns data in Swagger UI
-- [ ] Database has records (`python test_dashboard.py`)
 
 ---
 
-## 🔐 Security
+## Security
 
-- **Passwords:** bcrypt hashed (cost factor 12)
+- **Passwords:** bcrypt hashed (cost factor 10)
 - **JWT Tokens:** HS256 algorithm, 8-hour expiry
 - **Role-based Access:** HR vs Employee permissions enforced at API level
-- **CORS:** Configured for localhost (update for production)
+- **CORS:** Currently `allow_origins=["*"]` — restrict to specific origins in production
 - **Environment Variables:** Sensitive data in `.env` (not committed to git)
 
-> **Note on SECRET_KEY:** Use a strong random string in production. Generate one with:
+> **Production note:** Before deploying, update CORS in `api/main.py`:
 > ```python
-> import secrets; print(secrets.token_urlsafe(32))
+> allow_origins=["https://your-frontend-domain.com"]
 > ```
 
 ---
 
-## 📊 Database Schema
+## Database Schema
 
 ### `employees` Table
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INT (PK) | Employee ID |
+| `id` | INT (PK, AUTO_INCREMENT) | Employee ID |
 | `name` | VARCHAR(100) | Full name |
-| `email` | VARCHAR(100) | Login email (unique) |
-| `department` | VARCHAR(100) | Department |
+| `email` | VARCHAR(100) UNIQUE | Login email |
+| `department` | VARCHAR(100) | Department name |
 | `password` | VARCHAR(255) | bcrypt hashed password |
 | `auth_role` | VARCHAR(20) | `HR` or `EMPLOYEE` |
 
 ### `leaves` Table
 | Column | Type | Description |
 |--------|------|-------------|
-| `leave_id` | INT (PK) | Leave request ID |
+| `leave_id` | INT (PK, AUTO_INCREMENT) | Leave request ID |
 | `employee_id` | INT (FK) | References `employees.id` |
 | `leave_type` | VARCHAR(10) | `EL`, `CL`, or `SL` |
 | `start_date` | DATE | Leave start date |
@@ -709,167 +766,153 @@ window.location.href = '/';
 | `CL` | Casual Leave | 12 |
 | `SL` | Sick Leave | 12 |
 
+Leave balance counts both `approved` and `pending` leaves as used. Only `rejected` leaves are excluded.
+
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 ### Backend
-| Tool | Purpose |
-|------|---------|
-| FastAPI | REST API framework |
-| Groq (Llama) | LLM for agent reasoning |
-| LangGraph + LangChain | Agent pipeline & routing |
-| MySQL | Employee & leave data |
-| ChromaDB | Vector DB (policy + long-term memory) |
-| HuggingFace Sentence Transformers | Text embeddings |
-| JWT (python-jose) + bcrypt | Authentication |
-| APScheduler | Automatic memory cleanup |
-| LangSmith | Agent tracing & observability |
+| Tool | Version | Purpose |
+|------|---------|---------|
+| FastAPI | 0.128.5 | REST API framework |
+| Uvicorn | 0.40.0 | ASGI server |
+| LangGraph | 1.1.6 | Agent pipeline and routing |
+| LangChain | 1.2.15 | Agent memory and tools |
+| Groq (Llama 3.3-70b) | 0.37.1 | LLM for agent reasoning |
+| ChromaDB | 1.4.1 | Vector DB (policy + long-term memory) |
+| Sentence Transformers | 5.2.2 | Text embeddings (all-MiniLM-L6-v2) |
+| MySQL Connector | 9.6.0 | Employee and leave data |
+| APScheduler | 3.11.2 | Automatic memory cleanup |
+| python-jose + bcrypt | 3.5.0 / 5.0.0 | JWT auth + password hashing |
+| LangSmith | 0.6.7 | Agent tracing and observability |
+| google-api-python-client | 2.193.0 | Google Calendar integration |
+| pypdf | 6.6.0 | PDF policy document processing |
+| pydantic-settings | 2.9.1 | Centralized config with validation |
+| tenacity | 9.1.2 | Retry logic for DB queries |
+| yagmail | 0.15.293 | Simplified Gmail sending |
+| python-dateutil | 2.9.0 | Flexible date parsing in leave agent |
 
 ### Frontend
-| Tool | Purpose |
-|------|---------|
-| React 18 | UI framework |
-| Custom CSS | Styling |
-| Fetch API | HTTP requests |
-| React Hooks | State management |
+| Tool | Version | Purpose |
+|------|---------|---------|
+| React | 19.2.5 | UI framework |
+| React Router DOM | 7.14.2 | Client-side routing |
+| Tailwind CSS | 3.4.1 | Utility-first styling |
+| Framer Motion | 12.38.0 | Animations and transitions |
+| Recharts | 3.8.1 | Bar charts on HR dashboard |
+| Lucide React | 1.14.0 | Icon library |
+| clsx | 2.1.1 | Conditional class names |
 
 ### Integrations
-- **Email:** Gmail SMTP
-- **Calendar:** Google Calendar API
+- **Email:** Gmail SMTP (via `EMAIL_ADDRESS` + `EMAIL_APP_PASSWORD`)
+- **Calendar:** Google Calendar API (via `Credentials.json` OAuth)
+
+### Testing
+| Tool | Version | Purpose |
+|------|---------|---------|
+| pytest | 8.4.2 | Test runner (134 tests) |
+| pytest-asyncio | 0.24.0 | Async test support |
+| httpx | 0.28.1 | FastAPI TestClient HTTP layer |
 
 ---
 
-## 📝 Environment Variables
+## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GROQ_API_KEY` | ✓ | Groq API key for LLM |
-| `EMAIL_ADDRESS` | ✓ | Gmail address for sending emails |
-| `EMAIL_APP_PASSWORD` | ✓ | Gmail app password |
-| `DB_HOST` | ✓ | MySQL host (default: localhost) |
-| `DB_USER` | ✓ | MySQL username |
-| `DB_PASSWORD` | ✓ | MySQL password |
-| `DB_NAME` | ✓ | MySQL database name |
-| `SECRET_KEY` | ✓ | JWT secret key (use strong random string) |
-| `LANGCHAIN_API_KEY` | ✗ | LangSmith API key (optional) |
-| `LANGCHAIN_TRACING_V2` | ✗ | Enable LangSmith tracing (`true`/`false`) |
-| `LANGCHAIN_PROJECT` | ✗ | LangSmith project name |
-| `LANGCHAIN_ENDPOINT` | ✗ | LangSmith endpoint URL |
+All environment variables are validated at startup via `pydantic-settings` (`src/config.py`). Missing required values raise a clear error immediately rather than failing silently later.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GROQ_API_KEY` | Yes | — | Groq API key for LLM (Llama 3.3-70b) |
+| `EMAIL_ADDRESS` | No | `""` | Gmail address for sending emails |
+| `EMAIL_APP_PASSWORD` | No | `""` | Gmail App Password (not your account password) |
+| `DB_HOST` | No | `localhost` | MySQL host |
+| `DB_USER` | No | `root` | MySQL username |
+| `DB_PASSWORD` | No | `""` | MySQL password |
+| `DB_NAME` | No | `novahr` | MySQL database name |
+| `SECRET_KEY` | No | `dev_secret_change_in_production` | JWT signing secret — **change this in production** |
+| `LANGCHAIN_API_KEY` | No | `""` | LangSmith API key for tracing |
+| `LANGCHAIN_TRACING_V2` | No | `false` | Enable LangSmith tracing (`true`/`false`) |
+| `LANGCHAIN_PROJECT` | No | `novahr` | LangSmith project name |
+| `LANGCHAIN_ENDPOINT` | No | `https://api.smith.langchain.com` | LangSmith endpoint URL |
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Backend won't start
 - Check if port 8000 is in use: `netstat -ano | findstr :8000`
-- Verify `.env` file exists with all required variables
+- Verify `.env` exists with all required variables — `GROQ_API_KEY` is the only truly required one; missing it raises a `ValidationError` at startup
 - Ensure MySQL is running and credentials are correct
+- Make sure you run from the project root: `python scripts/start_api.py`
 
 ### Frontend can't connect to backend
 - Verify backend is running at `http://localhost:8000`
-- Check browser console for CORS errors
-- Clear localStorage: `localStorage.clear()`
+- Check browser console (F12) for CORS errors
+- Clear localStorage: open console and run `localStorage.clear()`
 
-### Token expired errors
-- Tokens expire after 8 hours
+### Token expired / 401 errors
+- JWT tokens expire after 8 hours
 - Logout and login again to get a fresh token
 
-### Leave requests not loading in dashboard
-- Ensure you're logged in as HR role
-- Run `python test_dashboard.py` to verify database has data
-- See [HR Dashboard Troubleshooting](#-hr-dashboard-troubleshooting) section
+### Dashboard shows no data
+- Ensure you're logged in as an HR user (`debabratadey9090@gmail.com`)
+- Verify the backend is running
+- Check browser console for errors
+- Test the API directly in Swagger UI at `http://localhost:8000/docs`
 
-### Memory not working
-- Check if message matches filter keywords (see [Memory System](#-memory-system))
-- Verify `data/long_term_memory/` directory exists
+Quick browser console test:
+```javascript
+// Login and get token
+fetch('http://localhost:8000/api/auth/login', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({ email: 'debabratadey9090@gmail.com', password: 'your_password' })
+}).then(r => r.json()).then(d => {
+  localStorage.setItem('token', d.token);
+  localStorage.setItem('user', JSON.stringify(d.user));
+  console.log('Role:', d.user.auth_role);
+});
+
+// Fetch leaves (run after login)
+fetch('http://localhost:8000/api/leaves', {
+  headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+}).then(r => r.json()).then(d => console.log('Leaves:', d));
+```
+
+### Memory not persisting
+- Check that `data/long_term_memory/` directory exists
+- Verify the message matches filter keywords (see Memory System section)
 - Check API logs for ChromaDB errors
 
-### ChromaDB errors
+### Reset ChromaDB memory
 ```python
-# Reset memory database
 import shutil
 shutil.rmtree("data/long_term_memory")
-# Then restart: python start_api.py
+# Restart: python scripts/start_api.py
 ```
+
+### Email not sending
+- Verify `EMAIL_ADDRESS` and `EMAIL_APP_PASSWORD` in `.env`
+- Use a Gmail App Password, not your regular Gmail password
+- Enable 2FA on your Google account first, then generate an App Password at myaccount.google.com/apppasswords
+- The project uses `yagmail` — if you see a keyring error on first run, set the password directly in `.env` (already the default behaviour)
+
+### Google Calendar not working
+- Ensure `Credentials.json` exists in the project root
+- Verify the Google Calendar API is enabled in your Google Cloud project
+- Re-run OAuth flow if credentials have expired
+- All events are created in **Asia/Kolkata (IST)** timezone — make sure your Google Calendar display timezone is also set to IST
 
 ---
 
-## 📈 Project Analysis
-
-> **Overall Grade: B+ (85/100)** — Production-ready foundation with clear improvement paths.
-
-### Strengths
-- ✅ Clean modular architecture (9/10)
-- ✅ JWT authentication with bcrypt
-- ✅ Role-based access control
-- ✅ Comprehensive documentation
-- ✅ Functional React frontend with good UX
-- ✅ Long-term memory system
-- ✅ LangSmith tracing on all agents
-
-### Areas for Improvement
-
-#### 🔴 High Priority
-1. **Fix CORS** — Currently `allow_origins=["*"]` is a security risk. Restrict to specific origins in production.
-2. **Add Rate Limiting** — Use `slowapi` to prevent API abuse (30 req/min recommended).
-3. **Structured Logging** — Replace `print()` statements with proper JSON logging.
-4. **Redis Session Storage** — Current in-memory sessions are lost on restart and don't scale.
-5. **Docker Configuration** — Add `Dockerfile` + `docker-compose.yml` for easy deployment.
-6. **API Tests** — Add `pytest` integration tests for all endpoints.
-7. **Health Check Endpoints** — Add `/health/liveness` and `/health/readiness` for load balancers.
-
-#### 🟡 Medium Priority
-8. Input validation and sanitization on all endpoints
-9. Password complexity requirements
-10. Database connection pooling
-11. React Router for proper frontend navigation
-12. Context API for global auth state
-13. CI/CD pipeline (GitHub Actions)
-
-#### 🟢 Low Priority (Nice to Have)
-14. Dark mode toggle
-15. PWA support for offline functionality
-16. Internationalization (i18n)
-17. Architecture diagrams (Mermaid)
-18. End-to-end tests with Playwright
-
-### Quick Wins (< 1 hour each)
-```python
-# 1. Generate secure SECRET_KEY
-import secrets; print(secrets.token_urlsafe(32))
-
-# 2. Fix CORS (api/main.py)
-allow_origins=["http://localhost:3000"]  # Instead of "*"
-
-# 3. Add health endpoint (api/routers/health.py)
-@router.get("/health")
-async def health(): return {"status": "alive"}
-```
-
-### Estimated Effort for All Improvements
-| Priority | Tasks | Time |
-|----------|-------|------|
-| High | 7 tasks | 2–3 days |
-| Medium | 7 tasks | 3–4 days |
-| Low | 6 tasks | 2–3 days |
-| **Total** | **20 tasks** | **7–10 days** |
-
----
-
-## 📄 License
+## License
 
 MIT License — free to use for personal or commercial projects.
 
 ---
 
-## 👥 Contributors
-
-Built with ❤️ by the NovaHR team.
-
----
-
-## 🔗 Links
+## Links
 
 - **API Documentation:** `http://localhost:8000/docs`
 - **Frontend:** `http://localhost:3000`
