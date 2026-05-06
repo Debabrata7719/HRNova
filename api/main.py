@@ -10,11 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from api.routers import chat, auth, leaves, memory
 from api.models import HealthResponse
-from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 from src.utils.memory_store import get_memory_store
+from src.logger import get_logger
 
-load_dotenv()
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="NovaHR API",
@@ -27,28 +27,22 @@ app = FastAPI(
 
 # ==================== AUTOMATIC MEMORY CLEANUP ====================
 def cleanup_old_memories_job():
-    """
-    Background job to clean up old memories.
-    Runs automatically every day at 2 AM.
-    """
+    """Background job — runs daily at 2 AM to delete memories older than 30 days."""
     try:
-        print("\n[MEMORY CLEANUP] Starting automatic cleanup...")
+        logger.info("[MEMORY CLEANUP] Starting automatic cleanup...")
         memory_store = get_memory_store()
-        
-        # Get stats before
         stats_before = memory_store.get_stats()
-        
-        # Delete memories older than 30 days
         memory_store.cleanup_old_memories(days=30)
-        
-        # Get stats after
         stats_after = memory_store.get_stats()
-        deleted = stats_before['total_memories'] - stats_after['total_memories']
-        
-        print(f"[MEMORY CLEANUP] Completed! Deleted {deleted} old memories")
-        print(f"[MEMORY CLEANUP] Total memories: {stats_before['total_memories']} → {stats_after['total_memories']}")
+        deleted = stats_before["total_memories"] - stats_after["total_memories"]
+        logger.info(
+            "[MEMORY CLEANUP] Done — deleted %d memories (%d → %d)",
+            deleted,
+            stats_before["total_memories"],
+            stats_after["total_memories"],
+        )
     except Exception as e:
-        print(f"[MEMORY CLEANUP] Failed: {str(e)}")
+        logger.error("[MEMORY CLEANUP] Failed: %s", e)
 
 
 # Initialize scheduler
@@ -67,14 +61,14 @@ scheduler.add_job(
 
 # Start scheduler
 scheduler.start()
-print("[SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)")
+logger.info("[SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)")
 
 
 @app.on_event("shutdown")
 def shutdown_scheduler():
     """Shutdown scheduler when app stops"""
     scheduler.shutdown()
-    print("[SCHEDULER] Scheduler stopped")
+    logger.info("[SCHEDULER] Scheduler stopped")
 # ==================== END AUTOMATIC CLEANUP ====================
 
 

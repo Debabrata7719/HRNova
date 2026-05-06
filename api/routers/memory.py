@@ -20,6 +20,10 @@ class CleanupRequest(BaseModel):
     """Request model for memory cleanup"""
     days: int = 30
 
+    class Config:
+        # Allow days=0 (delete all)
+        json_schema_extra = {"example": {"days": 30}}
+
 
 @router.get("/memory/stats")
 def get_memory_stats(user=Depends(get_current_user)):
@@ -41,7 +45,7 @@ def get_user_memories(user=Depends(get_current_user)):
     Users can only see their own memories.
     
     Returns:
-        List of user's memories
+        List of user's memories with metadata
     """
     user_id = str(user.get("user_id"))
     memories = memory_store.get_all_memories(user_id, limit=50)
@@ -50,6 +54,34 @@ def get_user_memories(user=Depends(get_current_user)):
         "user_id": user_id,
         "total_memories": len(memories),
         "memories": memories
+    }
+
+
+@router.get("/memory/all")
+def get_all_users_memories(user=Depends(get_current_user)):
+    """
+    Get memories for ALL users (HR only).
+    Returns memories grouped by user_id.
+    
+    Returns:
+        Dict keyed by user_id with memory lists
+    """
+    # Check if user is HR
+    if user.get("role") != "HR":
+        raise HTTPException(
+            status_code=403,
+            detail="Only HR can view all users' memories"
+        )
+    
+    memories_by_user = memory_store.get_all_users_memories(limit=200)
+    
+    # Calculate total
+    total = sum(len(mems) for mems in memories_by_user.values())
+    
+    return {
+        "total_memories": total,
+        "total_users": len(memories_by_user),
+        "memories_by_user": memories_by_user
     }
 
 
