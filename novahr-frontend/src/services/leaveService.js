@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8000";
+import API_BASE from "../config/api";
 
 function authHeaders() {
   const token = localStorage.getItem("token");
@@ -26,36 +26,17 @@ async function handleResponse(res) {
 }
 
 export async function getLeaves() {
-  const token = localStorage.getItem("token");
-  console.log("Fetching leaves with token:", token ? token.substring(0, 30) + "..." : "NO TOKEN");
-  
-  try {
-    const res = await fetch(`${API_BASE}/api/leaves`, {
-      headers: authHeaders(),
-    });
-    console.log("GET /api/leaves status:", res.status);
-    return handleResponse(res);
-  } catch (err) {
-    if (err.message.includes("fetch")) {
-      throw new Error("Cannot connect to server. Is the backend running on port 8000?");
-    }
-    throw err;
-  }
+  const res = await fetch(`${API_BASE}/api/leaves`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
 }
 
 export async function getLeaveStats() {
-  try {
-    const res = await fetch(`${API_BASE}/api/leaves/stats`, {
-      headers: authHeaders(),
-    });
-    console.log("GET /api/leaves/stats status:", res.status);
-    return handleResponse(res);
-  } catch (err) {
-    if (err.message.includes("fetch")) {
-      throw new Error("Cannot connect to server. Is the backend running on port 8000?");
-    }
-    throw err;
-  }
+  const res = await fetch(`${API_BASE}/api/leaves/stats`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
 }
 
 export async function approveLeave(leaveId) {

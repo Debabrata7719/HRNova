@@ -1,0 +1,2 @@
+# Custom Hooks folder
+Place reusable React hooks here (e.g., useAuth, useFetch, useLocalStorage).
