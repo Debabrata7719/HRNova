@@ -56,6 +56,7 @@ htmlcov/
 .tox/
 coverage.xml
 *.cover
+tests/check_credentials.py
 
 # ========================
 # Linting & Formatting
@@ -126,6 +127,9 @@ cache/
 graphs/
 memory_summaries.json
 AGENTS.md
+PROBLEMS.md
+FRONTEND_RESTRUCTURE.md
+git.md
 
 # ========================
 # Kiro IDE

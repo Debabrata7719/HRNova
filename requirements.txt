@@ -64,3 +64,21 @@ python-jose[cryptography]==3.5.0
 # Environment & Configuration
 # ========================
 python-dotenv==1.1.0
+pydantic-settings==2.9.1
+
+# ========================
+# Retry Logic
+# ========================
+tenacity==9.1.2
+
+# ========================
+# Email
+# ========================
+yagmail==0.15.293
+
+# ========================
+# Testing
+# ========================
+pytest==8.4.2
+pytest-asyncio==0.24.0
+httpx==0.28.1
