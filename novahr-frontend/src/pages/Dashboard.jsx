@@ -196,7 +196,9 @@ export default function Dashboard() {
       <aside className="w-64 bg-zinc-900 text-white flex flex-col">
         <div className="p-4 border-b border-zinc-800">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">💼</span>
+            <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0">
+              <img src="/bot-avatar.png" alt="NovaHR" className="w-full h-full object-contain" />
+            </div>
             <span className="text-xl font-bold">NovaHR</span>
           </div>
         </div>

@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { login } from "../services/authService";
 
+const LOGO = process.env.PUBLIC_URL + "/bot-avatar.png";
+
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -33,8 +35,8 @@ export default function Login() {
         <div className="bg-zinc-900 rounded-3xl p-8 space-y-6 border border-zinc-800 shadow-2xl">
           {/* Logo */}
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-              <div className="w-8 h-8 bg-black rounded-full"></div>
+            <div className="w-20 h-20 rounded-2xl overflow-hidden bg-black">
+              <img src={LOGO} alt="NovaHR" className="w-full h-full object-cover" />
             </div>
           </div>
 

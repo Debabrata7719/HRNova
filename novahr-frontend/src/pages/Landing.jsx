@@ -1,6 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
+import botAvatar from "../assets/bot-avatar.png";
+
+const LOGO = process.env.PUBLIC_URL + "/bot-avatar.png";
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -26,8 +29,8 @@ export default function Landing() {
       {/* Navigation */}
       <nav className="relative z-10 flex items-center justify-between px-8 py-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center">
-            <div className="w-5 h-5 bg-black rounded-full"></div>
+          <div className="w-10 h-10 rounded-xl overflow-hidden bg-black">
+            <img src={LOGO} alt="NovaHR" className="w-full h-full object-cover" />
           </div>
           <span className="text-2xl font-bold">NovaHR</span>
         </div>
@@ -108,8 +111,8 @@ export default function Landing() {
               {/* Mock Chat Interface */}
               <div className="space-y-4">
                 <div className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm">
-                    🤖
+                  <div className="w-9 h-9 rounded-full overflow-hidden bg-white flex-shrink-0">
+                    <img src={botAvatar} alt="NovaHR Bot" className="w-full h-full object-contain" />
                   </div>
                   <div className="bg-zinc-800 rounded-2xl rounded-tl-none px-4 py-3 text-left">
                     <p className="text-gray-300">Hello! How can I help you today?</p>
@@ -148,7 +151,9 @@ export default function Landing() {
               whileHover={{ scale: 1.05 }}
               className="bg-zinc-900 border border-zinc-800 rounded-2xl p-8 hover:border-blue-500/50 transition-all"
             >
-              <div className="text-5xl mb-4">🤖</div>
+              <div className="w-14 h-14 rounded-2xl overflow-hidden bg-white mb-4">
+                <img src={botAvatar} alt="NovaHR Bot" className="w-full h-full object-contain" />
+              </div>
               <h3 className="text-2xl font-bold mb-3">AI Assistant</h3>
               <p className="text-gray-400">
                 Chat with your AI HR assistant to handle leave requests, policy queries, and more.
