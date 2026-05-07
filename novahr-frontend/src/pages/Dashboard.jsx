@@ -46,9 +46,24 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [leavesData, statsData] = await Promise.all([getLeaves(), getLeaveStats()]);
-      setLeaves(leavesData);
-      setStats(statsData);
+      // Run independently so one failure doesn't block the other
+      const [leavesResult, statsResult] = await Promise.allSettled([
+        getLeaves(),
+        getLeaveStats(),
+      ]);
+
+      if (leavesResult.status === "fulfilled") {
+        setLeaves(leavesResult.value);
+      } else {
+        console.error("Leaves fetch error:", leavesResult.reason);
+        setError(leavesResult.reason?.message || "Failed to load leave requests");
+      }
+
+      if (statsResult.status === "fulfilled") {
+        setStats(statsResult.value);
+      } else {
+        console.error("Stats fetch error:", statsResult.reason);
+      }
     } catch (err) {
       console.error("Dashboard fetch error:", err);
       setError(err.message);
@@ -105,12 +120,19 @@ export default function Dashboard() {
     setMemoryLoading(true);
     setMemoryError(null);
     try {
-      const [statsData, allData] = await Promise.all([
+      const [statsResult, allResult] = await Promise.allSettled([
         getMemoryStats(),
         getAllUsersMemories(),
       ]);
-      setMemoryStats(statsData);
-      setMemoriesByUser(allData.memories_by_user || {});
+
+      if (statsResult.status === "fulfilled") {
+        setMemoryStats(statsResult.value);
+      }
+      if (allResult.status === "fulfilled") {
+        setMemoriesByUser(allResult.value.memories_by_user || {});
+      } else {
+        setMemoryError(allResult.reason?.message || "Failed to load memories");
+      }
     } catch (err) {
       setMemoryError(err.message);
     } finally {

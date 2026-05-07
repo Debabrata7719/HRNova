@@ -1,22 +1,35 @@
 import API_BASE from "../config/api";
 
 export async function login(email, password) {
-  const response = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-  const data = await response.json();
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      signal: controller.signal,
+    });
 
-  if (!response.ok) {
-    throw new Error(data.detail || "Login failed");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Login failed");
+    }
+
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("user", JSON.stringify(data.user));
+
+    return data;
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("Server is taking too long to respond. Please wait a moment and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  localStorage.setItem("token", data.token);
-  localStorage.setItem("user", JSON.stringify(data.user));
-
-  return data;
 }
 
 export function logout() {

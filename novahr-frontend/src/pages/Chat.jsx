@@ -11,6 +11,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
 
   const user = getUser();
   const sessionId = getOrCreateSessionId(user?.id || "guest");
@@ -19,6 +20,11 @@ export default function Chat() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Keep input focused on page load
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   // Welcome message on load
   useEffect(() => {
@@ -54,6 +60,8 @@ export default function Chat() {
       ]);
     } finally {
       setLoading(false);
+      // Refocus after state update — setTimeout ensures disabled is cleared first
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   };
 
@@ -213,6 +221,7 @@ export default function Chat() {
         <div className="bg-white border-t border-gray-200 px-6 py-4">
           <div className="flex gap-3 items-end">
             <textarea
+              ref={inputRef}
               className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
               placeholder="Type your message... (Enter to send)"
               value={input}
