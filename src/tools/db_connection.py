@@ -26,6 +26,9 @@ def _is_connection_error(exc: BaseException) -> bool:
     """Return True only for transient MySQL connection errors worth retrying."""
     if isinstance(exc, Error):
         return getattr(exc, "errno", None) in _CONNECTION_ERRORS
+    # Also retry if reconnect itself failed (no connection available)
+    if isinstance(exc, RuntimeError) and "No database connection" in str(exc):
+        return True
     return False
 
 
@@ -67,9 +70,16 @@ class DatabaseConnection:
         try:
             if self.connection:
                 self.connection.ping(reconnect=True, attempts=3, delay=1)
-                return
+                return  # ping succeeded — connection is alive
         except Exception:
             pass
+        # ping failed — force close the old connection and open a fresh one
+        try:
+            if self.connection:
+                self.connection.close()
+        except Exception:
+            pass
+        self.connection = None
         logger.warning("MySQL connection lost — reconnecting...")
         self._connect()
 
@@ -85,8 +95,8 @@ class DatabaseConnection:
             None  — on unrecoverable error
         """
         @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_fixed(0.5),
+            stop=stop_after_attempt(5),
+            wait=wait_fixed(1),
             retry=retry_if_exception(_is_connection_error),
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=False,
@@ -124,8 +134,8 @@ class DatabaseConnection:
             None — on error
         """
         @retry(
-            stop=stop_after_attempt(3),
-            wait=wait_fixed(0.5),
+            stop=stop_after_attempt(5),
+            wait=wait_fixed(1),
             retry=retry_if_exception(_is_connection_error),
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=False,
@@ -168,7 +178,7 @@ _db: DatabaseConnection | None = None
 def get_db() -> DatabaseConnection:
     """
     Return the global DatabaseConnection instance.
-    Recreates it if the connection is gone.
+    Recreates it if the connection is gone or broken.
     """
     global _db
     if _db is None or _db.connection is None:
