@@ -64,6 +64,28 @@ scheduler.start()
 logger.info("[SCHEDULER] Automatic memory cleanup enabled (runs daily at 2 AM)")
 
 
+@app.on_event("startup")
+async def startup_warmup():
+    """
+    Warm up ChromaDB and embedding model in a background thread.
+    Uses asyncio executor so it never blocks the event loop or the GIL.
+    """
+    import asyncio
+    import concurrent.futures
+
+    def _warmup():
+        try:
+            logger.info("[WARMUP] Pre-loading ChromaDB and embedding model...")
+            get_memory_store()
+            logger.info("[WARMUP] Done — server is ready")
+        except Exception as e:
+            logger.warning("[WARMUP] Failed (non-fatal): %s", e)
+
+    loop = asyncio.get_event_loop()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    loop.run_in_executor(executor, _warmup)
+
+
 @app.on_event("shutdown")
 def shutdown_scheduler():
     """Shutdown scheduler when app stops"""

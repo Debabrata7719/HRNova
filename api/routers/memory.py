@@ -4,6 +4,8 @@ Memory Management Router - Admin endpoints for memory operations
 
 import sys
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -13,7 +15,24 @@ from src.utils.memory_store import get_memory_store
 from pydantic import BaseModel
 
 router = APIRouter()
-memory_store = get_memory_store()
+
+# Thread pool for running blocking ChromaDB calls off the main thread
+_executor = ThreadPoolExecutor(max_workers=2)
+
+# Lazy initialization — initialized once on first use
+_memory_store = None
+
+def get_store():
+    global _memory_store
+    if _memory_store is None:
+        _memory_store = get_memory_store()
+    return _memory_store
+
+
+async def run_in_thread(fn, *args):
+    """Run a blocking function in a thread pool so it doesn't block the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, fn, *args)
 
 
 class CleanupRequest(BaseModel):
@@ -26,30 +45,17 @@ class CleanupRequest(BaseModel):
 
 
 @router.get("/memory/stats")
-def get_memory_stats(user=Depends(get_current_user)):
-    """
-    Get memory statistics.
-    Available to all authenticated users.
-    
-    Returns:
-        Total memory count and collection info
-    """
-    stats = memory_store.get_stats()
+async def get_memory_stats(user=Depends(get_current_user)):
+    """Get memory statistics. Available to all authenticated users."""
+    stats = await run_in_thread(lambda: get_store().get_stats())
     return stats
 
 
 @router.get("/memory/user")
-def get_user_memories(user=Depends(get_current_user)):
-    """
-    Get all memories for the current user.
-    Users can only see their own memories.
-    
-    Returns:
-        List of user's memories with metadata
-    """
+async def get_user_memories(user=Depends(get_current_user)):
+    """Get all memories for the current user."""
     user_id = str(user.get("user_id"))
-    memories = memory_store.get_all_memories(user_id, limit=50)
-    
+    memories = await run_in_thread(lambda: get_store().get_all_memories(user_id, limit=50))
     return {
         "user_id": user_id,
         "total_memories": len(memories),
@@ -58,26 +64,13 @@ def get_user_memories(user=Depends(get_current_user)):
 
 
 @router.get("/memory/all")
-def get_all_users_memories(user=Depends(get_current_user)):
-    """
-    Get memories for ALL users (HR only).
-    Returns memories grouped by user_id.
-    
-    Returns:
-        Dict keyed by user_id with memory lists
-    """
-    # Check if user is HR
+async def get_all_users_memories(user=Depends(get_current_user)):
+    """Get memories for ALL users (HR only)."""
     if user.get("role") != "HR":
-        raise HTTPException(
-            status_code=403,
-            detail="Only HR can view all users' memories"
-        )
-    
-    memories_by_user = memory_store.get_all_users_memories(limit=200)
-    
-    # Calculate total
+        raise HTTPException(status_code=403, detail="Only HR can view all users' memories")
+
+    memories_by_user = await run_in_thread(lambda: get_store().get_all_users_memories(limit=200))
     total = sum(len(mems) for mems in memories_by_user.values())
-    
     return {
         "total_memories": total,
         "total_users": len(memories_by_user),
@@ -86,58 +79,24 @@ def get_all_users_memories(user=Depends(get_current_user)):
 
 
 @router.delete("/memory/user")
-def clear_user_memories(user=Depends(get_current_user)):
-    """
-    Clear all memories for the current user.
-    Users can only delete their own memories.
-    
-    Returns:
-        Success message
-    """
+async def clear_user_memories(user=Depends(get_current_user)):
+    """Clear all memories for the current user."""
     user_id = str(user.get("user_id"))
-    memory_store.clear_user_memories(user_id)
-    
-    return {
-        "message": f"All memories cleared for user {user_id}",
-        "user_id": user_id
-    }
+    await run_in_thread(lambda: get_store().clear_user_memories(user_id))
+    return {"message": f"All memories cleared for user {user_id}", "user_id": user_id}
 
 
 @router.post("/memory/cleanup")
-def cleanup_old_memories(
-    request: CleanupRequest,
-    user=Depends(get_current_user)
-):
-    """
-    Delete old memories manually (HR only).
-    Deletes memories older than specified days.
-    
-    Note: Automatic cleanup runs daily at 2 AM (deletes 30+ day old memories).
-    Use this endpoint to run cleanup manually or with custom days.
-    
-    Args:
-        request: CleanupRequest with days parameter
-        
-    Returns:
-        Cleanup result
-    """
-    # Check if user is HR
+async def cleanup_old_memories(request: CleanupRequest, user=Depends(get_current_user)):
+    """Delete old memories manually (HR only)."""
     if user.get("role") != "HR":
-        raise HTTPException(
-            status_code=403,
-            detail="Only HR can perform memory cleanup"
-        )
-    
-    # Get stats before cleanup
-    stats_before = memory_store.get_stats()
-    
-    # Run cleanup
-    memory_store.cleanup_old_memories(days=request.days)
-    
-    # Get stats after cleanup
-    stats_after = memory_store.get_stats()
+        raise HTTPException(status_code=403, detail="Only HR can perform memory cleanup")
+
+    stats_before = await run_in_thread(lambda: get_store().get_stats())
+    await run_in_thread(lambda: get_store().cleanup_old_memories(days=request.days))
+    stats_after = await run_in_thread(lambda: get_store().get_stats())
     deleted = stats_before['total_memories'] - stats_after['total_memories']
-    
+
     return {
         "message": f"Deleted memories older than {request.days} days",
         "days": request.days,
@@ -148,31 +107,16 @@ def cleanup_old_memories(
 
 
 @router.post("/memory/cleanup/trigger")
-def trigger_cleanup_now(user=Depends(get_current_user)):
-    """
-    Trigger automatic cleanup immediately (HR only).
-    Uses default 30-day threshold.
-    
-    Returns:
-        Cleanup result
-    """
-    # Check if user is HR
+async def trigger_cleanup_now(user=Depends(get_current_user)):
+    """Trigger immediate cleanup (HR only). Uses default 30-day threshold."""
     if user.get("role") != "HR":
-        raise HTTPException(
-            status_code=403,
-            detail="Only HR can trigger memory cleanup"
-        )
-    
-    # Get stats before cleanup
-    stats_before = memory_store.get_stats()
-    
-    # Run cleanup with default 30 days
-    memory_store.cleanup_old_memories(days=30)
-    
-    # Get stats after cleanup
-    stats_after = memory_store.get_stats()
+        raise HTTPException(status_code=403, detail="Only HR can trigger memory cleanup")
+
+    stats_before = await run_in_thread(lambda: get_store().get_stats())
+    await run_in_thread(lambda: get_store().cleanup_old_memories(days=30))
+    stats_after = await run_in_thread(lambda: get_store().get_stats())
     deleted = stats_before['total_memories'] - stats_after['total_memories']
-    
+
     return {
         "message": "Cleanup triggered successfully",
         "days": 30,
@@ -183,29 +127,11 @@ def trigger_cleanup_now(user=Depends(get_current_user)):
 
 
 @router.delete("/memory/user/{user_id}")
-def clear_specific_user_memories(
-    user_id: int,
-    user=Depends(get_current_user)
-):
-    """
-    Clear all memories for a specific user (HR only).
-    
-    Args:
-        user_id: The user ID to clear memories for
-        
-    Returns:
-        Success message
-    """
-    # Check if user is HR
+async def clear_specific_user_memories(user_id: int, user=Depends(get_current_user)):
+    """Clear all memories for a specific user (HR only)."""
     if user.get("role") != "HR":
-        raise HTTPException(
-            status_code=403,
-            detail="Only HR can clear other users' memories"
-        )
-    
-    memory_store.clear_user_memories(str(user_id))
-    
-    return {
-        "message": f"All memories cleared for user {user_id}",
-        "user_id": user_id
-    }
+        raise HTTPException(status_code=403, detail="Only HR can clear other users' memories")
+
+    await run_in_thread(lambda: get_store().clear_user_memories(str(user_id)))
+    return {"message": f"All memories cleared for user {user_id}", "user_id": user_id}
+
