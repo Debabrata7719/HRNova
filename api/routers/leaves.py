@@ -160,36 +160,3 @@ def reject_leave(leave_id: int, user=Depends(get_current_user)):
     )
 
     return {"message": "Leave rejected successfully"}
-
-
-@router.get("/leaves/stats")
-def get_leave_stats(user=Depends(get_current_user)):
-    """
-    Get leave statistics summary.
-    HR only. Returns counts by status.
-    """
-    check_hr(user)
-
-    db = get_db()
-
-    query = """
-        SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-            SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
-        FROM leaves
-    """
-
-    result = db.execute_query(query)
-
-    if not result:
-        raise HTTPException(status_code=500, detail="Failed to fetch stats")
-
-    row = result[0]
-    return {
-        "total": int(row["total"] or 0),
-        "pending": int(row["pending"] or 0),
-        "approved": int(row["approved"] or 0),
-        "rejected": int(row["rejected"] or 0),
-    }
