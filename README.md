@@ -1,7 +1,4 @@
 # NovaHR - AI-Powered HR Assistant
-
-## UI Preview
-
 ## UI Preview
 
 <p align="center">
