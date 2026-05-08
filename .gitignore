@@ -76,6 +76,7 @@ tests/check_credentials.py
 *~
 *.sublime-project
 *.sublime-workspace
+.kiro/
 
 # ========================
 # OS
