@@ -4,21 +4,10 @@
 
 ## UI Preview
 
-<table>
-  <tr>
-    <td align="center">
-      <img src="./data/SS1.png" width="100%" />
-      <br />
-      <b>Landing Page</b>
-    </td>
-
-    <td align="center">
-      <img src="./data/SS2.png" width="100%" />
-      <br />
-      <b>Dashboard</b>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="./data/SS1.png" width="49%" />
+  <img src="./data/SS2.png" width="49%" />
+</p>
 
 > Complete HR management system with AI chatbot, leave management, email automation, calendar scheduling, policy Q&A, and long-term memory.
 
