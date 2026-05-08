@@ -125,12 +125,7 @@ cache/
 # ========================
 # NovaHR Specific
 # ========================
-graphs/
-memory_summaries.json
-AGENTS.md
-PROBLEMS.md
-FRONTEND_RESTRUCTURE.md
-git.md
+SCALABILITY.md
 
 # ========================
 # Kiro IDE
