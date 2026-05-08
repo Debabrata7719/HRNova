@@ -1,5 +1,23 @@
 # NovaHR - AI-Powered HR Assistant
 
+## UI Preview
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="./data/SS1.png" width="100%" />
+      <br />
+      <b>AI Assistant Dashboard</b>
+    </td>
+
+    <td align="center">
+      <img src="./data/SS2.png" width="100%" />
+      <br />
+      <b>Landing Page</b>
+    </td>
+  </tr>
+</table>
+
 > Complete HR management system with AI chatbot, leave management, email automation, calendar scheduling, policy Q&A, and long-term memory.
 
 ---
