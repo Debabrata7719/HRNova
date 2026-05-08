@@ -378,11 +378,16 @@ export default function Chat() {
 
         {/* Header */}
         <header className="relative z-10 bg-zinc-900/60 backdrop-blur border-b border-white/[0.05] px-6 py-4 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold text-white">NovaHR Assistant</h2>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-sm text-white/40">Online</span>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full overflow-hidden bg-white flex-shrink-0">
+              <img src={botAvatar} alt="NovaHR" className="w-full h-full object-contain" />
+            </div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-white">NovaHR Assistant</h2>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-sm text-white/40">Online</span>
+              </div>
             </div>
           </div>
         </header>
