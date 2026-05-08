@@ -2,18 +2,20 @@
 
 ## UI Preview
 
+## UI Preview
+
 <table>
   <tr>
     <td align="center">
       <img src="./data/SS1.png" width="100%" />
       <br />
-      <b>AI Assistant Dashboard</b>
+      <b>Landing Page</b>
     </td>
 
     <td align="center">
       <img src="./data/SS2.png" width="100%" />
       <br />
-      <b>Landing Page</b>
+      <b>Dashboard</b>
     </td>
   </tr>
 </table>
