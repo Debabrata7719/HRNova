@@ -11,11 +11,50 @@ Usage: python add_employee.py
 import sys
 import os
 import bcrypt
+import random
+import yagmail
 
 # Go up one level from scripts/ to project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.tools.db_connection import get_db
+from src.config import get_settings
+
+
+def generate_password(name: str) -> str:
+    """Generate password: First4LettersOfCleanName + @ + 4 random digits"""
+    clean_name = "".join(name.split()).title()
+    prefix = clean_name[:4] if len(clean_name) >= 4 else clean_name
+    digits = str(random.randint(1000, 9999))
+    return f"{prefix}@{digits}"
+
+
+def send_welcome_email(employee_name: str, employee_email: str, password: str) -> bool:
+    """Send welcome email after successful DB insertion."""
+    cfg = get_settings()
+    if not cfg.EMAIL_ADDRESS or not cfg.EMAIL_APP_PASSWORD:
+        print("  ⚠ Email not configured — skipping welcome email")
+        return False
+    try:
+        yag = yagmail.SMTP(user=cfg.EMAIL_ADDRESS, password=cfg.EMAIL_APP_PASSWORD)
+        subject = "Welcome to NovaHR — Your Account is Ready"
+        body = f"""Hello {employee_name},
+
+Your NovaHR account has been created by HR.
+
+Your login credentials:
+  Email    : {employee_email}
+  Password : {password}
+
+Please log in and change your password after your first login.
+This is a system generated email, don't reply to it.
+
+— NovaHR HR Team"""
+        yag.send(to=employee_email, subject=subject, contents=body)
+        return True
+    except Exception as e:
+        print(f"  ⚠ Could not send email: {e}")
+        return False
 
 
 def print_header():
@@ -30,8 +69,7 @@ def print_menu():
     """Display main menu."""
     print("\nWhat would you like to do?")
     print("  1. Add new employee")
-    print("  2. Reset employee password")
-    print("  3. Exit")
+    print("  2. Exit")
     print()
 
 
@@ -127,41 +165,31 @@ def find_employee(db, search_term):
 
 
 def collect_employee_details():
-    """Walk through all fields interactively."""
+    """Walk through all fields interactively. Password is auto-generated."""
 
     print("Fill in the employee details below.")
     print("(Press Ctrl+C at any time to cancel)\n")
 
-    # --- Name ---
     print("── Name")
     name = get_input("  Full name")
 
-    # --- Email ---
     print("\n── Email")
     email = get_input("  Email address")
-    # Basic format check
     if "@" not in email or "." not in email.split("@")[-1]:
         print(f"  ⚠ '{email}' doesn't look like a valid email, but continuing anyway.")
 
-    # --- Department ---
     print("\n── Department")
     print("  Examples: Engineering, HR, Marketing, Finance, Operations, Sales")
     department = get_input("  Department")
 
-    # --- Role ---
     print("\n── Role")
     role = get_role()
-
-    # --- Password ---
-    print("\n── Password  (used to log in to NovaHR)")
-    password = get_password()
 
     return {
         "name": name,
         "email": email,
         "department": department,
         "role": role,
-        "password": password,
     }
 
 
@@ -174,7 +202,7 @@ def confirm_details(details):
     print(f"    Email      : {details['email']}")
     print(f"    Department : {details['department']}")
     print(f"    Role       : {details['role']}")
-    print(f"    Password   : {'*' * len(details['password'])}")
+    print(f"    Password   : auto-generated")
     print("─" * 50)
     print()
     answer = input("  Save this employee? [Y/n]: ").strip().lower()
@@ -182,9 +210,10 @@ def confirm_details(details):
 
 
 def save_employee(db, details):
-    """Hash password and insert into DB."""
+    """Generate password, hash it, insert into DB, then send welcome email."""
+    password = generate_password(details["name"])
     hashed = bcrypt.hashpw(
-        details["password"].encode("utf-8"),
+        password.encode("utf-8"),
         bcrypt.gensalt(rounds=10)
     ).decode("utf-8")
 
@@ -195,6 +224,7 @@ def save_employee(db, details):
         """,
         (details["name"], details["email"], details["department"], hashed, details["role"])
     )
+    return password
 
 
 def reset_password_workflow(db):
@@ -279,11 +309,20 @@ def add_employee_workflow(db):
             print("  Discarded. Starting over...\n")
             continue
 
-        # Save
+        # Save — returns the generated password
         try:
-            save_employee(db, details)
+            password = save_employee(db, details)
             print(f"\n  ✔ Employee '{details['name']}' added successfully!")
-            print(f"    They can log in with: {details['email']}")
+            print(f"    Login email : {details['email']}")
+            print(f"    Password    : {password}  ← save this, shown only once")
+
+            # Send welcome email ONLY after successful DB insert
+            print("\n  Sending welcome email...")
+            sent = send_welcome_email(details["name"], details["email"], password)
+            if sent:
+                print("  ✔ Welcome email sent to employee.")
+            else:
+                print("  ⚠ Email not sent — share the password manually.")
         except Exception as e:
             print(f"\n  ✗ Failed to save: {e}")
 
@@ -310,17 +349,15 @@ def main():
 
     while True:
         print_menu()
-        choice = input("  Enter your choice [1-3]: ").strip()
-        
+        choice = input("  Enter your choice [1-2]: ").strip()
+
         if choice == "1":
             add_employee_workflow(db)
         elif choice == "2":
-            reset_password_workflow(db)
-        elif choice == "3":
             print("\n  Goodbye!")
             break
         else:
-            print("\n  ✗ Invalid choice. Please enter 1, 2, or 3.")
+            print("\n  ✗ Invalid choice. Please enter 1 or 2.")
 
     print()
     print("=" * 50)
