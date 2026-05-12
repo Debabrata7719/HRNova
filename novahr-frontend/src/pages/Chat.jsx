@@ -4,12 +4,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   SendIcon, LoaderIcon, Paperclip, Command,
   CalendarDays, BarChart2, BookOpen, CalendarClock,
-  LayoutDashboard, ChevronLeft, ChevronRight, LogOut, Search,
-} from "lucide-react";
-import botAvatar from "../assets/bot-avatar.png";
+  LayoutDashboard, ChevronLeft, ChevronRight, LogOut, Search, KeyRound, UserPlus,
+} from "lucide-react";import botAvatar from "../assets/bot-avatar.png";
 import { sendMessage, clearSession } from "../services/chatService";
-import { logout, getUser } from "../services/authService";
+import { logout, getUser, changePassword } from "../services/authService";
 import { getLeaveStats } from "../services/leaveService";
+import { addEmployee } from "../services/employeeService";
 import { getOrCreateSessionId, clearSessionId } from "../utils/session";
 import ChatBubble from "../components/ui/ChatBubble";
 
@@ -99,6 +99,20 @@ export default function Chat() {
   const user = getUser();
   const sessionId = getOrCreateSessionId(user?.id || "guest");
   const isHR = user?.auth_role === "HR";
+
+  // Change Password modal state
+  const [showChangePwd, setShowChangePwd] = useState(false);
+  const [pwdForm, setPwdForm] = useState({ current: "", newPwd: "", confirm: "" });
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdError, setPwdError] = useState("");
+  const [pwdSuccess, setPwdSuccess] = useState(false);
+
+  // Add Employee modal state (HR only)
+  const [showAddEmp, setShowAddEmp] = useState(false);
+  const [empForm, setEmpForm] = useState({ name: "", email: "", department: "", role: "EMPLOYEE" });
+  const [empLoading, setEmpLoading] = useState(false);
+  const [empError, setEmpError] = useState("");
+  const [empSuccess, setEmpSuccess] = useState(null);
 
   // Fetch pending leave count for HR badge
   useEffect(() => {
@@ -203,6 +217,34 @@ export default function Chat() {
 
   const handleNewChat = async () => {
     await clearSession(sessionId); clearSessionId(user?.id || "guest"); window.location.reload();
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwdError(""); setPwdSuccess(false); setPwdLoading(true);
+    try {
+      await changePassword(pwdForm.current, pwdForm.newPwd, pwdForm.confirm);
+      setPwdSuccess(true);
+      setPwdForm({ current: "", newPwd: "", confirm: "" });
+    } catch (err) {
+      setPwdError(err.message);
+    } finally {
+      setPwdLoading(false);
+    }
+  };
+
+  const handleAddEmployee = async (e) => {
+    e.preventDefault();
+    setEmpError(""); setEmpSuccess(null); setEmpLoading(true);
+    try {
+      const result = await addEmployee(empForm.name, empForm.email, empForm.department, empForm.role);
+      setEmpSuccess({ name: result.employee.name, email: result.employee.email, password: result.generated_password, emailSent: result.email_sent });
+      setEmpForm({ name: "", email: "", department: "", role: "EMPLOYEE" });
+    } catch (err) {
+      setEmpError(err.message);
+    } finally {
+      setEmpLoading(false);
+    }
   };
 
   const badgeText = pendingLeaves != null
@@ -313,6 +355,28 @@ export default function Chat() {
               )}
             </button>
           )}
+
+          {/* Add Employee — HR only */}
+          {isHR && (
+            <button
+              onClick={() => { setShowAddEmp(true); setEmpSuccess(null); setEmpError(""); }}
+              className={cn(
+                "relative w-full flex items-center rounded-md text-left transition-all duration-200 group mt-1",
+                "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-3 py-2.5"
+              )}
+              title={isCollapsed ? "Add Employee" : undefined}
+            >
+              <UserPlus className="w-4 h-4 flex-shrink-0 text-slate-500 group-hover:text-slate-700" />
+              {!isCollapsed && <span className="text-sm">Add Employee</span>}
+              {isCollapsed && (
+                <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                  Add Employee
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-1.5 h-1.5 bg-slate-800 rotate-45" />
+                </div>
+              )}
+            </button>
+          )}
         </nav>
 
         {/* Bottom — profile + logout */}
@@ -340,6 +404,28 @@ export default function Chat() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Change Password — all roles */}
+          <div className="px-3 pb-1">
+            <button
+              onClick={() => { setShowChangePwd(true); setPwdError(""); setPwdSuccess(false); setPwdForm({ current: "", newPwd: "", confirm: "" }); }}
+              className={cn(
+                "w-full flex items-center rounded-md text-left transition-all duration-200 group",
+                "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-3 py-2.5"
+              )}
+              title={isCollapsed ? "Change Password" : undefined}
+            >
+              <KeyRound className="w-4 h-4 flex-shrink-0 text-slate-500 group-hover:text-slate-700" />
+              {!isCollapsed && <span className="text-sm">Change Password</span>}
+              {isCollapsed && (
+                <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all whitespace-nowrap z-50">
+                  Change Password
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 w-1.5 h-1.5 bg-slate-800 rotate-45" />
+                </div>
+              )}
+            </button>
           </div>
 
           {/* Logout */}
@@ -532,6 +618,155 @@ export default function Chat() {
           />
         )}
       </main>
+
+      {/* ── Change Password Modal ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {showChangePwd && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowChangePwd(false)} />
+            <motion.div
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+              initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-gray-900">Change Password</h2>
+                <button onClick={() => setShowChangePwd(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              </div>
+
+              {pwdSuccess ? (
+                <div className="text-center py-4">
+                  <p className="text-4xl mb-3">✅</p>
+                  <p className="text-green-700 font-semibold">Password changed successfully!</p>
+                  <button onClick={() => setShowChangePwd(false)} className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Close</button>
+                </div>
+              ) : (
+                <form onSubmit={handleChangePassword} className="space-y-4">
+                  {pwdError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">⚠ {pwdError}</div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+                    <input type="password" required value={pwdForm.current}
+                      onChange={(e) => setPwdForm((p) => ({ ...p, current: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                    <input type="password" required value={pwdForm.newPwd}
+                      onChange={(e) => setPwdForm((p) => ({ ...p, newPwd: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                    <input type="password" required value={pwdForm.confirm}
+                      onChange={(e) => setPwdForm((p) => ({ ...p, confirm: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button type="button" onClick={() => setShowChangePwd(false)}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                    <button type="submit" disabled={pwdLoading}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                      {pwdLoading ? "Saving..." : "Save Password"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Add Employee Modal (HR only) ──────────────────────────────── */}
+      <AnimatePresence>
+        {showAddEmp && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAddEmp(false)} />
+            <motion.div
+              className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6"
+              initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 10 }}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-gray-900">Add New Employee</h2>
+                <button onClick={() => setShowAddEmp(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              </div>
+
+              {empSuccess ? (
+                <div className="space-y-3">
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                    <p className="text-sm font-semibold text-green-800 mb-2">✓ Employee added successfully</p>
+                    <p className="text-sm text-green-700">Name: <span className="font-medium">{empSuccess.name}</span></p>
+                    <p className="text-sm text-green-700">Email: <span className="font-medium">{empSuccess.email}</span></p>
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <p className="text-sm text-green-700">Password:</p>
+                      <span className="font-mono font-bold text-green-900 bg-green-100 px-2 py-0.5 rounded text-sm">{empSuccess.password}</span>
+                      <span className="text-xs text-green-600 italic">save this — shown once</span>
+                    </div>
+                    <p className="text-xs text-green-600 mt-2">
+                      {empSuccess.emailSent ? "✉ Credentials emailed to employee." : "⚠ Email failed — share password manually."}
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => { setEmpSuccess(null); setEmpError(""); }}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Add Another</button>
+                    <button onClick={() => setShowAddEmp(false)}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Done</button>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleAddEmployee} className="space-y-4">
+                  {empError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">⚠ {empError}</div>
+                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                      <input type="text" required placeholder="e.g. Raj Kumar" value={empForm.name}
+                        onChange={(e) => setEmpForm((p) => ({ ...p, name: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                      <input type="email" required placeholder="e.g. raj@company.com" value={empForm.email}
+                        onChange={(e) => setEmpForm((p) => ({ ...p, email: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                      <input type="text" required placeholder="e.g. Engineering" value={empForm.department}
+                        onChange={(e) => setEmpForm((p) => ({ ...p, department: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                      <select value={empForm.role} onChange={(e) => setEmpForm((p) => ({ ...p, role: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
+                        <option value="EMPLOYEE">Employee</option>
+                        <option value="HR">HR</option>
+                      </select>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">Password is auto-generated and emailed to the employee.</p>
+                  <div className="flex gap-3 pt-1">
+                    <button type="button" onClick={() => setShowAddEmp(false)}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                    <button type="submit" disabled={empLoading}
+                      className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                      {empLoading ? "Adding..." : "Add Employee"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

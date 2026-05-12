@@ -8,10 +8,8 @@ import {
   getAllUsersMemories,
   getMemoryStats,
   clearUserMemories,
-  triggerCleanup,
   cleanupOldMemories,
-} from "../services/memoryService";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+} from "../services/memoryService";import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -33,6 +31,7 @@ export default function Dashboard() {
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [clearingUser, setClearingUser] = useState(null);
   const [confirmClear, setConfirmClear] = useState(null); // userId to confirm clear
+
 
   const user = getUser();
   const sessionId = getOrCreateSessionId(user?.id || "guest");
@@ -644,6 +643,7 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
       </main>
 
       {/* Toast */}
