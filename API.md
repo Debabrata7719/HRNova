@@ -495,6 +495,87 @@ Trigger immediate cleanup using the default 30-day threshold.
 
 ---
 
+### Employees — `/api`
+
+#### `POST /api/employees`
+Add a new employee to the database. HR only.
+
+Password is **auto-generated** using the format: `First4LettersOfCleanName@4Digits`
+
+Examples:
+- `"Raj Kumar"` → `Rajk@4821`
+- `"Sayandip Bar"` → `Saya@3392`
+- `"Ali"` → `Ali@7719`
+
+**Auth:** Required — **HR only**
+
+**Request body:**
+```json
+{
+  "name": "Raj Kumar",
+  "email": "raj@company.com",
+  "department": "Engineering",
+  "role": "EMPLOYEE"
+}
+```
+
+**Role values:** `EMPLOYEE`, `HR`
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "employee": {
+    "id": 3,
+    "name": "Raj Kumar",
+    "email": "raj@company.com",
+    "department": "Engineering",
+    "role": "EMPLOYEE"
+  },
+  "generated_password": "Rajk@4821",
+  "email_sent": true,
+  "message": "Employee 'Raj Kumar' added successfully. Credentials emailed to the employee."
+}
+```
+
+**Response `200`** (email failed — employee still created):
+```json
+{
+  "success": true,
+  "employee": { ... },
+  "generated_password": "Rajk@4821",
+  "email_sent": false,
+  "message": "Employee 'Raj Kumar' added successfully. Email could not be sent — share the password manually."
+}
+```
+
+**Response `400`** — Email already registered:
+```json
+{
+  "detail": "Email 'raj@company.com' is already registered"
+}
+```
+
+**Response `400`** — Invalid role:
+```json
+{
+  "detail": "Role must be EMPLOYEE or HR"
+}
+```
+
+**Response `403`** — Not HR role
+
+**Response `422`** — Missing required fields
+
+**Response `500`** — Database insertion failed (email is NOT sent in this case)
+
+**Important rules:**
+- Email is sent **only after** successful DB insertion — if DB fails, no email is sent
+- The generated password is returned in the response and shown once to HR
+- A welcome email is sent to the new employee's address with their login credentials
+
+---
+
 ## Error Reference
 
 | Status | Meaning |
