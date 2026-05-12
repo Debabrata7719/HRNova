@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from api.routers import chat, auth, leaves, memory
+from api.routers import chat, auth, leaves, memory, employees
 from api.models import HealthResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from src.utils.memory_store import get_memory_store
@@ -144,6 +144,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
 app.include_router(leaves.router, prefix="/api", tags=["Leaves"])
 app.include_router(memory.router, prefix="/api", tags=["Memory"])
+app.include_router(employees.router, prefix="/api", tags=["Employees"])
 
 
 @app.get("/", response_model=HealthResponse)
