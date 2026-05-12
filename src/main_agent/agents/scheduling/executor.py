@@ -39,30 +39,47 @@ def load_credentials():
     """Load OAuth credentials from token.json"""
     token_path = os.path.join(BASE_DIR, "token.json")
     creds = None
+
     if os.path.exists(token_path):
-        with open(token_path, "r") as f:
-            token_data = json.load(f)
-            creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+        try:
+            with open(token_path, "r") as f:
+                token_data = json.load(f)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+        except Exception as e:
+            logger.warning("Failed to load token.json: %s", e)
+            return None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open(token_path, "w") as f:
-                f.write(
-                    json.dumps(
-                        {
-                            "token": creds.token,
-                            "refresh_token": creds.refresh_token,
-                            "token_uri": creds.token_uri,
-                            "client_id": creds.client_id,
-                            "client_secret": creds.client_secret,
-                            "scopes": creds.scopes,
-                        }
-                    )
-                )
+            try:
+                creds.refresh(Request())
+                # Save refreshed token
+                with open(token_path, "w") as f:
+                    f.write(json.dumps({
+                        "token": creds.token,
+                        "refresh_token": creds.refresh_token,
+                        "token_uri": creds.token_uri,
+                        "client_id": creds.client_id,
+                        "client_secret": creds.client_secret,
+                        "scopes": creds.scopes,
+                    }))
+            except Exception as e:
+                error_str = str(e).lower()
+                if "invalid_grant" in error_str or "token has been expired" in error_str or "revoked" in error_str:
+                    # Token is permanently invalid — delete it so user knows to re-auth
+                    logger.warning("Google OAuth token expired/revoked. Deleting token.json — re-authentication required.")
+                    try:
+                        os.remove(token_path)
+                    except Exception:
+                        pass
+                    return None
+                else:
+                    logger.error("Failed to refresh Google token: %s", e)
+                    return None
         else:
-            logger.warning("No valid Google Calendar credentials found")
+            logger.warning("No valid Google Calendar credentials found. Run the OAuth flow to generate token.json.")
             return None
+
     return creds
 
 
@@ -175,7 +192,14 @@ def create_calendar_event(
     """Create event on Google Calendar"""
     creds = load_credentials()
     if not creds:
-        return {"success": False, "message": "No credentials"}
+        return {
+            "success": False,
+            "message": (
+                "Google Calendar is not connected. "
+                "Please re-authenticate by running the OAuth flow. "
+                "Delete token.json (if it exists) and restart the server to trigger re-authentication."
+            )
+        }
 
     end_datetime = start_datetime + timedelta(hours=1)
 
