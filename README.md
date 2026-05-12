@@ -92,6 +92,7 @@ Open `http://localhost:3000` and login:
 - **Statistics** — Real-time counts (Total, Pending, Approved, Rejected) with bar chart
 - **Filter by Status** — Filter leave requests by All, Pending, Approved, Rejected
 - **Memory Management Panel** — HR-only section at the bottom of the dashboard to view all employees' stored memories, clear per-user memories, and run manual cleanup with a configurable day threshold
+- **Add Employee** — HR can add new employees directly from the dashboard. Password is auto-generated (format: `First4Letters@4Digits`) and emailed to the new employee automatically
 
 ### Authentication and Security
 - **JWT Token-based Auth** — Secure login with bcrypt password hashing
@@ -118,7 +119,8 @@ NovaHR/
 │   │   ├── auth.py                  # Login endpoint
 │   │   ├── chat.py                  # Chat endpoint + memory integration
 │   │   ├── leaves.py                # Leave management (HR only)
-│   │   └── memory.py                # Memory management API
+│   │   ├── memory.py                # Memory management API
+│   │   └── employees.py             # Add employee endpoint (HR only)
 │   ├── main.py                      # FastAPI app, CORS, APScheduler
 │   └── models.py                    # Pydantic models (ChatRequest, ChatResponse, etc.)
 │
@@ -165,7 +167,8 @@ NovaHR/
 │       │   ├── authService.js       # Login, logout, getUser, getToken
 │       │   ├── chatService.js       # sendMessage, clearSession
 │       │   ├── leaveService.js      # getLeaves, getLeaveStats, approve, reject
-│       │   └── memoryService.js     # getMemoryStats, getAllUsersMemories, cleanup
+│       │   ├── memoryService.js     # getMemoryStats, getAllUsersMemories, cleanup
+│       │   └── employeeService.js   # addEmployee (HR only)
 │       ├── config/
 │       │   └── api.js               # Centralized API base URL
 │       ├── utils/
@@ -174,7 +177,8 @@ NovaHR/
 │
 ├── scripts/
 │   ├── start_api.py                 # Starts uvicorn server on port 8000
-│   ├── add_employee.py              # Add employees or reset passwords (interactive CLI)
+│   ├── add_employee.py              # Add new employee via CLI (auto-generates password)
+│   ├── setup_google_auth.py         # Google Calendar OAuth setup (run once)
 │   └── cleanup_memory.py            # Manual memory cleanup script
 │
 ├── data/
@@ -192,6 +196,7 @@ NovaHR/
 │   ├── test_memory.py               # Memory filter + ChromaDB store tests
 │   ├── test_api_endpoints.py        # FastAPI endpoint integration tests
 │   ├── test_router.py               # Intent routing tests (all 22 cases)
+│   ├── test_add_employee.py         # Add employee: password gen, DB insert, email order
 │   └── test_connections.py          # Basic connection checks
 │
 ├── pytest.ini                       # Pytest configuration
@@ -690,17 +695,16 @@ Starts uvicorn on `http://localhost:8000` with hot-reload enabled.
 ```bash
 python scripts/add_employee.py
 ```
-Interactive CLI with two options:
+Interactive CLI — adds a new employee to the database.
 
-**1. Add new employee**
-- Prompts for name, email, department, role (EMPLOYEE/HR), password
+- Prompts for name, email, department, role (EMPLOYEE/HR)
+- **Password is auto-generated** — format: `First4LettersOfName@4Digits`
+  - Example: "Raj Kumar" → `Rajk@4821`
 - Validates email uniqueness
 - Hashes password with bcrypt (10 rounds)
+- Sends welcome email with credentials to the new employee after successful DB insert
 
-**2. Reset employee password**
-- Search by name (partial match) or email (exact match)
-- Handles multiple matches with a selection list
-- Confirms before updating
+> Note: Reset password option has been removed from the CLI. Use `POST /api/employees` from the HR Dashboard instead.
 
 ### Memory Cleanup
 ```bash
@@ -713,11 +717,12 @@ python scripts/cleanup_memory.py --days 60
 
 ### Run Tests
 ```bash
-# Run full test suite (134 tests)
+# Run full test suite
 python -m pytest tests/ -v
 
 # Run a specific test file
 python -m pytest tests/test_auth.py -v
+python -m pytest tests/test_add_employee.py -v
 
 # Run with short output
 python -m pytest tests/ --tb=short
