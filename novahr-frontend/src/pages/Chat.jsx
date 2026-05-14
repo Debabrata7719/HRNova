@@ -9,7 +9,7 @@ import {
 import { sendMessage, clearSession } from "../services/chatService";
 import { logout, getUser, changePassword } from "../services/authService";
 import { getLeaveStats } from "../services/leaveService";
-import { addEmployee } from "../services/employeeService";
+import { addEmployee, streamUploadEmployees } from "../services/employeeService";
 import { getOrCreateSessionId, clearSessionId } from "../utils/session";
 import ChatBubble from "../components/ui/ChatBubble";
 
@@ -109,10 +109,20 @@ export default function Chat() {
 
   // Add Employee modal state (HR only)
   const [showAddEmp, setShowAddEmp] = useState(false);
+  const [empTab, setEmpTab] = useState("manual"); // "manual" | "bulk"
   const [empForm, setEmpForm] = useState({ name: "", email: "", department: "", role: "EMPLOYEE" });
   const [empLoading, setEmpLoading] = useState(false);
   const [empError, setEmpError] = useState("");
   const [empSuccess, setEmpSuccess] = useState(null);
+  // Bulk upload state
+  const [bulkFile, setBulkFile] = useState(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkResult, setBulkResult] = useState(null);
+  // Live counters during streaming
+  const [liveSuccess, setLiveSuccess] = useState(0);
+  const [liveFailed, setLiveFailed] = useState(0);
+  const [liveStreaming, setLiveStreaming] = useState(false);
 
   // Fetch pending leave count for HR badge
   useEffect(() => {
@@ -238,13 +248,42 @@ export default function Chat() {
     setEmpError(""); setEmpSuccess(null); setEmpLoading(true);
     try {
       const result = await addEmployee(empForm.name, empForm.email, empForm.department, empForm.role);
-      setEmpSuccess({ name: result.employee.name, email: result.employee.email, password: result.generated_password, emailSent: result.email_sent });
+      setEmpSuccess({ name: result.employee.name, email: result.employee.email, emailSent: result.email_sent });
       setEmpForm({ name: "", email: "", department: "", role: "EMPLOYEE" });
     } catch (err) {
       setEmpError(err.message);
     } finally {
       setEmpLoading(false);
     }
+  };
+
+  const handleBulkUpload = async (e) => {
+    e.preventDefault();
+    if (!bulkFile) { setBulkError("Please select an Excel file"); return; }
+    setBulkError(""); setBulkResult(null);
+    setLiveSuccess(0); setLiveFailed(0); setLiveStreaming(true); setBulkLoading(true);
+
+    streamUploadEmployees(
+      bulkFile,
+      // onProgress — called for each row
+      (event) => {
+        if (event.status === "success") setLiveSuccess((p) => p + 1);
+        else setLiveFailed((p) => p + 1);
+      },
+      // onDone — called when all rows processed
+      (summary) => {
+        setBulkResult(summary);
+        setBulkFile(null);
+        setLiveStreaming(false);
+        setBulkLoading(false);
+      },
+      // onError
+      (err) => {
+        setBulkError(err);
+        setLiveStreaming(false);
+        setBulkLoading(false);
+      }
+    );
   };
 
   const badgeText = pendingLeaves != null
@@ -359,7 +398,7 @@ export default function Chat() {
           {/* Add Employee — HR only */}
           {isHR && (
             <button
-              onClick={() => { setShowAddEmp(true); setEmpSuccess(null); setEmpError(""); }}
+              onClick={() => { setShowAddEmp(true); setEmpSuccess(null); setEmpError(""); setLiveSuccess(0); setLiveFailed(0); setLiveStreaming(false); setBulkResult(null); setBulkFile(null); setBulkError(""); }}
               className={cn(
                 "relative w-full flex items-center rounded-md text-left transition-all duration-200 group mt-1",
                 "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
@@ -703,13 +742,10 @@ export default function Chat() {
                     <p className="text-sm font-semibold text-green-800 mb-2">✓ Employee added successfully</p>
                     <p className="text-sm text-green-700">Name: <span className="font-medium">{empSuccess.name}</span></p>
                     <p className="text-sm text-green-700">Email: <span className="font-medium">{empSuccess.email}</span></p>
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <p className="text-sm text-green-700">Password:</p>
-                      <span className="font-mono font-bold text-green-900 bg-green-100 px-2 py-0.5 rounded text-sm">{empSuccess.password}</span>
-                      <span className="text-xs text-green-600 italic">save this — shown once</span>
-                    </div>
                     <p className="text-xs text-green-600 mt-2">
-                      {empSuccess.emailSent ? "✉ Credentials emailed to employee." : "⚠ Email failed — share password manually."}
+                      {empSuccess.emailSent
+                        ? "✉ Login credentials have been emailed to the employee."
+                        : "⚠ Email could not be sent — please share credentials manually."}
                     </p>
                   </div>
                   <div className="flex gap-3">
@@ -720,48 +756,162 @@ export default function Chat() {
                   </div>
                 </div>
               ) : (
-                <form onSubmit={handleAddEmployee} className="space-y-4">
-                  {empError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">⚠ {empError}</div>
-                  )}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                      <input type="text" required placeholder="e.g. Raj Kumar" value={empForm.name}
-                        onChange={(e) => setEmpForm((p) => ({ ...p, name: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-                      <input type="email" required placeholder="e.g. raj@company.com" value={empForm.email}
-                        onChange={(e) => setEmpForm((p) => ({ ...p, email: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                      <input type="text" required placeholder="e.g. Engineering" value={empForm.department}
-                        onChange={(e) => setEmpForm((p) => ({ ...p, department: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                      <select value={empForm.role} onChange={(e) => setEmpForm((p) => ({ ...p, role: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
-                        <option value="EMPLOYEE">Employee</option>
-                        <option value="HR">HR</option>
-                      </select>
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-400">Password is auto-generated and emailed to the employee.</p>
-                  <div className="flex gap-3 pt-1">
-                    <button type="button" onClick={() => setShowAddEmp(false)}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
-                    <button type="submit" disabled={empLoading}
-                      className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
-                      {empLoading ? "Adding..." : "Add Employee"}
+                <>
+                  {/* Tabs */}
+                  <div className="flex gap-1 mb-5 bg-gray-100 rounded-lg p-1">
+                    <button onClick={() => { setEmpTab("manual"); setEmpError(""); setBulkError(""); setBulkResult(null); }}
+                      className={`flex-1 py-1.5 text-sm rounded-md font-medium transition-colors ${empTab === "manual" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                      Manual Entry
+                    </button>
+                    <button onClick={() => { setEmpTab("bulk"); setEmpError(""); setEmpSuccess(null); }}
+                      className={`flex-1 py-1.5 text-sm rounded-md font-medium transition-colors ${empTab === "bulk" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                      Upload Excel
                     </button>
                   </div>
-                </form>
+
+                  {/* Manual tab */}
+                  {empTab === "manual" && (
+                    <form onSubmit={handleAddEmployee} className="space-y-4">
+                      {empError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">⚠ {empError}</div>}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                          <input type="text" required placeholder="e.g. Raj Kumar" value={empForm.name}
+                            onChange={(e) => setEmpForm((p) => ({ ...p, name: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                          <input type="email" required placeholder="e.g. raj@company.com" value={empForm.email}
+                            onChange={(e) => setEmpForm((p) => ({ ...p, email: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                          <input type="text" required placeholder="e.g. Engineering" value={empForm.department}
+                            onChange={(e) => setEmpForm((p) => ({ ...p, department: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                          <select value={empForm.role} onChange={(e) => setEmpForm((p) => ({ ...p, role: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white">
+                            <option value="EMPLOYEE">Employee</option>
+                            <option value="HR">HR</option>
+                          </select>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-400">Password is auto-generated and emailed to the employee.</p>
+                      <div className="flex gap-3 pt-1">
+                        <button type="button" onClick={() => setShowAddEmp(false)}
+                          className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                        <button type="submit" disabled={empLoading}
+                          className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                          {empLoading ? "Adding..." : "Add Employee"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Bulk upload tab */}
+                  {empTab === "bulk" && (
+                    <div className="space-y-4">
+                      {/* Format hint */}
+                      <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700">
+                        <p className="font-semibold mb-1">Excel format (row 1 = header):</p>
+                        <p className="font-mono">name | email | department | role</p>
+                        <p className="mt-1 text-blue-500">Role must be EMPLOYEE or HR. Leave role empty to default to EMPLOYEE.</p>
+                      </div>
+
+                      {bulkError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">⚠ {bulkError}</div>}
+
+                      {/* Upload result */}
+                      {bulkResult && (
+                        <div className="space-y-3">
+                          {/* Summary */}
+                          <div className="grid grid-cols-3 gap-3">
+                            <div className="p-3 bg-gray-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-gray-800">{bulkResult.total_rows}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">Total Rows</p>
+                            </div>
+                            <div className="p-3 bg-green-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-green-700">{bulkResult.success_count}</p>
+                              <p className="text-xs text-green-600 mt-0.5">Added</p>
+                            </div>
+                            <div className="p-3 bg-red-50 rounded-lg text-center">
+                              <p className="text-2xl font-bold text-red-700">{bulkResult.fail_count}</p>
+                              <p className="text-xs text-red-600 mt-0.5">Failed</p>
+                            </div>
+                          </div>
+
+                          {/* Failed rows */}
+                          {bulkResult.failed.length > 0 && (
+                            <div className="border border-red-200 rounded-lg overflow-hidden">
+                              <div className="px-3 py-2 bg-red-50 border-b border-red-200">
+                                <p className="text-xs font-semibold text-red-700">Failed Rows</p>
+                              </div>
+                              <div className="max-h-40 overflow-y-auto divide-y divide-gray-100">
+                                {bulkResult.failed.map((row, i) => (
+                                  <div key={i} className="px-3 py-2">
+                                    <p className="text-xs font-medium text-gray-700">Row {row.row} — {row.name} ({row.email})</p>
+                                    <p className="text-xs text-red-600 mt-0.5">{row.errors.join(", ")}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <button onClick={() => { setBulkResult(null); setBulkFile(null); setLiveSuccess(0); setLiveFailed(0); }}
+                            className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50">
+                            Upload Another File
+                          </button>
+                        </div>
+                      )}
+
+                      {/* File picker */}
+                      {!bulkResult && (
+                        <form onSubmit={handleBulkUpload} className="space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Select Excel File</label>
+                            <input type="file" accept=".xlsx,.xls" required
+                              onChange={(e) => setBulkFile(e.target.files[0] || null)}
+                              className="w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100" />
+                            {bulkFile && <p className="text-xs text-gray-500 mt-1">Selected: {bulkFile.name}</p>}
+                          </div>
+
+                          {/* Live counters — shown while streaming */}
+                          {liveStreaming && (
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-center">
+                                <p className="text-3xl font-bold text-green-700">{liveSuccess}</p>
+                                <p className="text-xs text-green-600 mt-0.5 font-medium">✓ Success</p>
+                              </div>
+                              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-center">
+                                <p className="text-3xl font-bold text-red-700">{liveFailed}</p>
+                                <p className="text-xs text-red-600 mt-0.5 font-medium">✗ Failed</p>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex gap-3">
+                            <button type="button" onClick={() => setShowAddEmp(false)}
+                              disabled={liveStreaming}
+                              className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-40">Cancel</button>
+                            <button type="submit" disabled={bulkLoading || !bulkFile}
+                              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                              {liveStreaming ? (
+                                <span className="flex items-center justify-center gap-2">
+                                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  Processing...
+                                </span>
+                              ) : bulkLoading ? "Uploading..." : "Upload & Add"}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </motion.div>
           </motion.div>

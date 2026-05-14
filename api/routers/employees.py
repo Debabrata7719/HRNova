@@ -1,14 +1,19 @@
 """
 Employee Management Router
-POST /api/employees — Add a new employee (HR only)
-Auto-generates password, inserts to DB, then sends welcome email.
-Email is ONLY sent after successful DB insertion.
+POST /api/employees            — Add a single employee (HR only)
+POST /api/employees/bulk       — Bulk add from Excel, returns full summary (HR only)
+POST /api/employees/bulk/stream — Bulk add with real-time SSE progress (HR only)
 """
 
+import re
+import io
+import json
 import random
 import bcrypt
 import yagmail
-from fastapi import APIRouter, Depends, HTTPException
+import openpyxl
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from api.dependencies.auth import get_current_user
 from src.tools.db_connection import get_db
@@ -17,6 +22,9 @@ from src.logger import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+VALID_ROLES = {"EMPLOYEE", "HR"}
+EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class AddEmployeeRequest(BaseModel):
@@ -167,3 +175,286 @@ def add_employee(request: AddEmployeeRequest, user=Depends(get_current_user)):
                else "Email could not be sent — share the password manually.")
         )
     }
+
+
+@router.post("/employees/bulk")
+async def bulk_add_employees(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+    """
+    Bulk add employees from an Excel (.xlsx) file. HR only.
+
+    Expected Excel columns (row 1 = header, data from row 2):
+        name | email | department | role
+
+    Validation per row:
+    - name: required, non-empty
+    - email: required, valid format, not duplicate in DB, not duplicate within file
+    - department: required, non-empty
+    - role: must be EMPLOYEE or HR (case-insensitive), defaults to EMPLOYEE if empty
+
+    Order of operations per valid row:
+    1. Insert into DB
+    2. Send welcome email ONLY after successful insert
+
+    Returns a full upload summary with success count, failure count, and per-row errors.
+    """
+    if user.get("role") != "HR":
+        raise HTTPException(status_code=403, detail="Only HR can bulk add employees")
+
+    # Validate file type
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are supported")
+
+    # Read file into memory
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read Excel file: {str(e)}")
+
+    rows = list(ws.iter_rows(values_only=True))
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="Excel file is empty or has no data rows")
+
+    # Skip header row
+    data_rows = rows[1:]
+
+    db = get_db()
+
+    # Fetch all existing emails from DB once (for duplicate check)
+    existing = db.execute_query("SELECT email FROM employees") or []
+    existing_emails = {row["email"].lower() for row in existing}
+
+    results = []
+    success_count = 0
+    fail_count = 0
+    seen_emails_in_file = set()  # track duplicates within the uploaded file
+
+    for idx, row in enumerate(data_rows, start=2):  # start=2 because row 1 is header
+        # Extract columns — handle None and extra whitespace
+        name = str(row[0]).strip() if row[0] is not None else ""
+        email = str(row[1]).strip().lower() if row[1] is not None else ""
+        department = str(row[2]).strip() if row[2] is not None else ""
+        role_raw = str(row[3]).strip().upper() if row[3] is not None else ""
+        role = role_raw if role_raw in VALID_ROLES else "EMPLOYEE"
+
+        # ── Validation ────────────────────────────────────────────────────────
+        errors = []
+
+        if not name or name.lower() == "none":
+            errors.append("Name is required")
+
+        if not email or email.lower() == "none":
+            errors.append("Email is required")
+        elif not EMAIL_REGEX.match(email):
+            errors.append(f"Invalid email format: '{email}'")
+        elif email in existing_emails:
+            errors.append(f"Email already registered in database")
+        elif email in seen_emails_in_file:
+            errors.append(f"Duplicate email in uploaded file")
+
+        if not department or department.lower() == "none":
+            errors.append("Department is required")
+
+        if role_raw and role_raw not in VALID_ROLES:
+            errors.append(f"Invalid role '{role_raw}' — must be EMPLOYEE or HR")
+
+        if errors:
+            fail_count += 1
+            results.append({
+                "row": idx,
+                "name": name or "(empty)",
+                "email": email or "(empty)",
+                "status": "failed",
+                "errors": errors,
+            })
+            continue
+
+        # Mark email as seen in this file
+        seen_emails_in_file.add(email)
+
+        # ── Generate password ─────────────────────────────────────────────────
+        password = generate_password(name)
+        hashed = bcrypt.hashpw(
+            password.encode("utf-8"),
+            bcrypt.gensalt(rounds=10)
+        ).decode("utf-8")
+
+        # ── DB insertion ──────────────────────────────────────────────────────
+        new_id = db.insert_query(
+            """
+            INSERT INTO employees (name, email, department, password, auth_role)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (name, email, department, hashed, role)
+        )
+
+        if new_id is None:
+            fail_count += 1
+            results.append({
+                "row": idx,
+                "name": name,
+                "email": email,
+                "status": "failed",
+                "errors": ["Database insertion failed"],
+            })
+            continue
+
+        # Add to existing_emails so subsequent rows in same file detect it as duplicate
+        existing_emails.add(email)
+        logger.info("[BULK] Added employee: %s (%s)", name, email)
+
+        # ── Send welcome email ONLY after successful DB insert ─────────────────
+        email_sent = send_welcome_email(name, email, password)
+
+        success_count += 1
+        results.append({
+            "row": idx,
+            "name": name,
+            "email": email,
+            "status": "success",
+            "email_sent": email_sent,
+        })
+
+    # Build summary
+    failed_rows = [r for r in results if r["status"] == "failed"]
+    success_rows = [r for r in results if r["status"] == "success"]
+
+    logger.info(
+        "[BULK] Upload complete — %d success, %d failed out of %d rows",
+        success_count, fail_count, len(data_rows)
+    )
+
+    return {
+        "total_rows": len(data_rows),
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "successful": success_rows,
+        "failed": failed_rows,
+    }
+
+
+@router.post("/employees/bulk/stream")
+async def bulk_add_employees_stream(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+    """
+    Bulk add employees from Excel with real-time SSE progress streaming.
+    HR only.
+
+    Streams JSON events as each row is processed:
+      {"type": "progress", "row": 3, "status": "success", "name": "Raj", "email": "raj@co.com"}
+      {"type": "progress", "row": 4, "status": "failed",  "name": "...", "email": "...", "errors": [...]}
+      {"type": "done", "total_rows": 10, "success_count": 8, "fail_count": 2, "failed": [...]}
+    """
+    if user.get("role") != "HR":
+        raise HTTPException(status_code=403, detail="Only HR can bulk add employees")
+
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are supported")
+
+    contents = await file.read()
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read Excel file: {str(e)}")
+
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="Excel file is empty or has no data rows")
+
+    data_rows = rows[1:]
+
+    async def event_generator():
+        db = get_db()
+        existing = db.execute_query("SELECT email FROM employees") or []
+        existing_emails = {row["email"].lower() for row in existing}
+        seen_in_file = set()
+        failed_rows = []
+        success_count = 0
+        fail_count = 0
+
+        for idx, row in enumerate(data_rows, start=2):
+            name = str(row[0]).strip() if row[0] is not None else ""
+            email = str(row[1]).strip().lower() if row[1] is not None else ""
+            department = str(row[2]).strip() if row[2] is not None else ""
+            role_raw = str(row[3]).strip().upper() if row[3] is not None else ""
+            role = role_raw if role_raw in VALID_ROLES else "EMPLOYEE"
+
+            errors = []
+            if not name or name.lower() == "none":
+                errors.append("Name is required")
+            if not email or email.lower() == "none":
+                errors.append("Email is required")
+            elif not EMAIL_REGEX.match(email):
+                errors.append(f"Invalid email format")
+            elif email in existing_emails:
+                errors.append("Email already registered")
+            elif email in seen_in_file:
+                errors.append("Duplicate email in file")
+            if not department or department.lower() == "none":
+                errors.append("Department is required")
+            if role_raw and role_raw not in VALID_ROLES:
+                errors.append(f"Invalid role '{role_raw}'")
+
+            if errors:
+                fail_count += 1
+                entry = {"row": idx, "name": name or "(empty)", "email": email or "(empty)", "errors": errors}
+                failed_rows.append(entry)
+                event = {"type": "progress", "row": idx, "status": "failed",
+                         "name": name or "(empty)", "email": email or "(empty)", "errors": errors}
+                yield f"data: {json.dumps(event)}\n\n"
+                continue
+
+            seen_in_file.add(email)
+
+            password = generate_password(name)
+            hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
+
+            new_id = db.insert_query(
+                "INSERT INTO employees (name, email, department, password, auth_role) VALUES (%s, %s, %s, %s, %s)",
+                (name, email, department, hashed, role)
+            )
+
+            if new_id is None:
+                fail_count += 1
+                entry = {"row": idx, "name": name, "email": email, "errors": ["Database insertion failed"]}
+                failed_rows.append(entry)
+                event = {"type": "progress", "row": idx, "status": "failed",
+                         "name": name, "email": email, "errors": ["Database insertion failed"]}
+                yield f"data: {json.dumps(event)}\n\n"
+                continue
+
+            existing_emails.add(email)
+            email_sent = send_welcome_email(name, email, password)
+            success_count += 1
+
+            event = {"type": "progress", "row": idx, "status": "success",
+                     "name": name, "email": email, "email_sent": email_sent}
+            yield f"data: {json.dumps(event)}\n\n"
+
+        # Final done event
+        done_event = {
+            "type": "done",
+            "total_rows": len(data_rows),
+            "success_count": success_count,
+            "fail_count": fail_count,
+            "failed": failed_rows,
+        }
+        yield f"data: {json.dumps(done_event)}\n\n"
+        logger.info("[BULK STREAM] Done — %d success, %d failed", success_count, fail_count)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )

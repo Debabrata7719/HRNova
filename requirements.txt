@@ -53,7 +53,7 @@ python-multipart==0.0.20
 # Background Scheduling
 # ========================
 apscheduler==3.11.2
-
+sse-starlette==3.2.0
 # ========================
 # Authentication & Security
 # ========================
@@ -75,6 +75,11 @@ tenacity==9.1.2
 # Email
 # ========================
 yagmail==0.15.293
+
+# ========================
+# Excel Processing
+# ========================
+openpyxl==3.1.5
 
 # ========================
 # Testing
